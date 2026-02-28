@@ -1131,7 +1131,7 @@ function Get-QualityScore {
     return $quality
 }
 
-function Analyze-ExtractedSubtitle {
+function Get-ExtractedSubtitle {
     param([string]$basePath, [int]$trackNum, [bool]$MetadataForced)
     $r = [PSCustomObject]@{ TrackNum=$trackNum; Language=''; IsForced=$MetadataForced; IsText=$false; IsSDH=$false; IsCommentary=$false; IsoCode=''; IsVobSub=$false; Hash='' }
     $srt="$basePath.srt"; $idx="$basePath.idx"; $sub="$basePath.sub"; $sup="$basePath.sup"; $ass="$basePath.ass"
