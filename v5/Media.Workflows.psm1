@@ -123,26 +123,19 @@ function New-SubtitleMuxPlan {
     $allowedIso = @('eng','spa','fra','ita','rus')
     $nameMap = @{ 'eng'='English'; 'spa'='Spanish'; 'fra'='French'; 'ita'='Italian'; 'rus'='Russian' }
     
-    if ($null -ne $SubTracks){
-    Write-Host $SubTracks.GetType()
-    } else {
-        Write-Host "WARN: No subs found" -ForegroundColor Yellow
+    if ($null -eq $SubTracks){
+        Write-Log "WARN: No subs found" -Color Yellow
     }
     
     $SubTracks = $SubTracks | Where-Object { $allowedIso -contains $_.IsoCode }
-    
-    Write-Host $SubTracks.GetType()
     
     $i = $SubTracks[0].TrackKey - 1
     $classified = foreach ($t in $SubTracks) {
         $cl = Get-SubtitleClassification -Subtitle $t -AllSubtitles $SubTracks
         if ($cl.Confidence -eq 'Low') { $needsManualReview = $true }
 
-        #$color = switch ($cl.Confidence) { "High"{"Green"} "Medium"{"Yellow"} "Low"{"Red"} }
-        Write-Log "    [$i] Track $($t.TrackKey): $($t.Language.Value) $($cl.Type)" -Color Cyan 
-        #(Confidence: $($cl.Confidence))" -Color Cyan -NoNewLine
-        #Write-Log "      Reason: $($cl.Reason)" -Color DarkGray -NoTimeStamp
-
+        Write-Log "    [$i] Track $($t.TrackKey): $(Convert-IsoToLanguage $t.Language) $($cl.Type)" -Color Cyan
+        
         [PSCustomObject]@{
             Track        = $t
             IsoCode      = $t.IsoCode

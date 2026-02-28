@@ -61,7 +61,7 @@ function Convert-IsoCode {
 function Convert-IsoToLanguage {
     param([string]$isoCode)
 
-    switch ($isoCode.ToLower()) {
+    $newLanguage = switch ($isoCode.ToLower()) {
         "eng"   { "English" }
         "fra"   { "French" }
         "spa"   { "Spanish" }
@@ -74,6 +74,8 @@ function Convert-IsoToLanguage {
         "por"   { "Portuguese" }
         default { "Unknown" }
     }
+
+    return $newLanguage
 }
 
 function Convert-SubCodecType {

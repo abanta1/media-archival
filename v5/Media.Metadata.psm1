@@ -623,10 +623,6 @@ function Merge-SubtitleMetadata {
     $mkvJSubTracks = $Raw.MkvJSubs
     $mkvISubTracks = $Raw.MkvISubs
     $miSubTracks = $Raw.MiSubs
-
-    Write-Log "  Processing subtitle metadata..." -Color Green
-    #
-    #
     
     Write-Log "  Processing subtitle metadata..." -Color Green
 

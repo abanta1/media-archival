@@ -12,7 +12,7 @@ function Write-Log {
         [switch]$NoHost
     )
     $timestamp = if ($NoTimeStamp) { "" } else { "[$([DateTime]::Now.ToString('yyyy-MM-Ddd HH:mm:ss'))]" }
-    $logMessage = "$timestamp$Message"
+    $logMessage = "$timestamp $Message"
 
     if (-not $NoHost) {
         Write-Host $logMessage -ForegroundColor $Color -NoNewline:($NoNewLine.IsPresent)

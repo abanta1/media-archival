@@ -95,8 +95,16 @@ function Invoke-EncodeMode {
                 $track = $subtitleTracks | Where-Object { $_.TrackKey -eq $k } | Select-Object -First 1
                 if ($track -and $track.Title) {
                     $names += $track.Title 
-                } elseif (-not $null -eq $track.Language -and -not "" -eq $track.Language) {
-                        $names += (Get-ProposedTrackName $track.Language)
+                } elseif (-not [string]::IsNullOrEmpty($track.Language)) {
+                    if ($track.Language.Length -eq 2){
+                        $langIsoCode = Convert-IsoCode $track.Language
+                    } elseif ($track.Language.Length -eq 3){
+                        $langIsoCode = $track.Language
+                    } else { $langIsoCode = $null }
+                    if (-not $null -eq $langIsoCode){
+                        $longLanguage = Convert-IsoToLanguage $langIsoCode
+                    } else { $longLanguage = $track.Language }
+                    $names += (Get-ProposedTrackName $longLanguage)
                 } else { $names += "Unknown" }
             }
         }
@@ -224,13 +232,10 @@ function Invoke-EncodeMode {
 
             foreach ($k in $keys) {
                 $track = $subtitleTracks | Where-Object { $_.TrackKey -eq $k } | Select-Object -First 1
-                $classification = $vid.Classifications | Where-Object { $_.TrackKey -eq $k } | Select-Object -First 1
+                $classification = $sub.Classifications | Where-Object { $_.TrackKey -eq $k } | Select-Object -First 1
 
                 if ($track) {
-                    $trackName = if ($track.Title) { $track.Title
-                    } elseif ($track.Language) {
-                        Get-ProposedTrackName $track.Language
-                    } else { "Unknown" }
+                    $trackName = if ($i -le $sub.Names.Count) { $sub.Names[$i-1] } else { "Unknown" }
 
                     $nameType = if ($classification) {
                         $classification.NameType
@@ -268,22 +273,25 @@ function Invoke-EncodeMode {
             "--aname",           (($vid.AudioArgs.Names | ForEach-Object { "`"$_`"" }) -join ","),
             "-o",                "$outputFile"
         )
-		foreach ($tk in $sub) {
-		}
+        
         if ($sub.SubtitleList) {
             $hbArgs += "--subtitle=$hbSubOrder" #$($sub.SubtitleList)"
             $i=0; $subNames = foreach ($name in $sub.Names) {
-                $nt = if ($i -lt $vid.Classifications.Count) { $vid.Classifications[$i].NameType } else { "" }
+                $nt = if ($i -lt $sub.Classifications.Count) { $sub.Classifications[$i].NameType } else { "" }
                 "`"$name $nt`""; $i++
             }
             $hbArgs += "--subname=$($subNames -join ',')"
             if ($vid.IsTextSub.IsText -or $vid.DoProcess) {
                 if ($sub.ForcedTrack) { $hbArgs += "--subtitle-forced=$($sub.ForcedTrack.TrackNum)" }
                 if ($sub.Burn)        { $hbArgs += "--subtitle-burned=$($sub.SubtitleList.Split(',')[0])" }
-                if ($sub.Default -contains $true) { $hbArgs += "--subtitle-default=$($sub.Default.IndexOf($true)+1)" }
+                if ($sub.Default -contains $true) { $hbArgs += "--subtitle-default=$($sub.Default.IndexOf($true)+1)" } 
+                else { $hbArgs += "--subtitle-default=none" }
             }
         }
+
+        #Write-Host "DEBUG: hbargs $hbArgs"
         exit
+        
         & $handBrakePath @hbArgs 2>> $logFile 3>$null
         $failed = $false
         if ($LASTEXITCODE -ne 0) { Write-Log "  FAILED - HandBrake exit $LASTEXITCODE" -Color Red; $failed=$true }
