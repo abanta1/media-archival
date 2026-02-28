@@ -6,7 +6,7 @@ function New-AudioStrategy {
     $english = @($AudioTracks | Where-Object { $_.IsEnglish -and -not $_.IsCommentary })
 	$english = @($english | Sort-Object @{Expression={$_.Quality}; Descending=$true}, TrackKey)
     $commentary = @($AudioTracks | Where-Object { $_.IsEnglish -and $_.IsCommentary })
-    $addedLossless=$false; $addedSurround=$false; $addedAC3=$false; $i=0
+    $addedLossless=$false; $addedAC3=$false; $i=0
 	$losslessTrack = $null
 
     foreach ($track in $english) {
@@ -26,7 +26,7 @@ function New-AudioStrategy {
 
 		# Track 1: Best Lossless 5.1+ (if exist)
         if ($track.Quality -ge 85 -and $track.Channels -ge 5.1 -and -not $addedLossless) {
-            $inc=$true; $addedLossless=$true; $addedSurround=$true; $losslessTrack=$track
+            $inc=$true; $addedLossless=$true; $losslessTrack=$track
             if ($track.Format -match 'LPCM|pcm_s16le|pcm_s24le') {
 				$enc="ac3" #Universally compatible
 				$mix="5point1" #7.1 not supported ac3
@@ -39,7 +39,7 @@ function New-AudioStrategy {
             $s.DescriptionList += "[$i] Track $($track.TrackKey): $name"; $i++
 		# Track 2: AC3 5.1 for compatibility
 		} elseif ($track.Quality -ge 50 -and $track.Channels -ge 5.1 -and -not $addedAC3) {
-			$inc=$true; $addedSurround=$true; $addedAC3=$true
+			$inc=$true; $addedAC3=$true
 			if ($losslessTrack){
 				# Encode from lossless track
 				$s.Tracks+=$losslessTrack.TrackNum
@@ -411,7 +411,7 @@ function Export-SubtitleTrack {
     # --- TEXT: SRT / UTF-8 / SUBRIP ---
     #
     if ($Track.IsText -and ($Track.CodecID -match "srt|utf|text|subrip|S_TEXT")) {
-        $out = cmd /c "`"$ffmpegPath`" -y -i `"$InputFile`" -map 0:s:$si -c:s srt `"$base.srt`" 2>&1"
+        cmd /c "`"$ffmpegPath`" -y -i `"$InputFile`" -map 0:s:$si -c:s srt `"$base.srt`" 2>&1"
         if ($LASTEXITCODE -ne 0) {
             Write-Log "  WARNING: SRT extraction failed ($LASTEXITCODE)" -Color Red
         }
@@ -551,4 +551,4 @@ function Get-UserClassification {
     return $classifications
 }
 
-Export-ModuleMember -Function New-AudioStrategy, New-SubtitleMuxPlan, Get-SubtitleClassification, Get-UserClassification, Get-ProposedTrackName
+Export-ModuleMember -Function New-AudioStrategy, New-SubtitleMuxPlan, Get-SubtitleClassification, Get-ProposedTrackName, Get-SuggestedType, Get-OrderedTrack, Select-Preset, Export-SubtitleTrack, New-RemuxWithSubtitles, Get-UserClassification

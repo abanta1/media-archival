@@ -1,4 +1,5 @@
 function Invoke-EncodeMode {
+
     Test-Dependency @(
         @{ Name="FFmpeg";       Path=$ffmpegPath    }
         @{ Name="mkvmerge";     Path=$mkvmergePath  }
@@ -317,6 +318,7 @@ function Invoke-EncodeMode {
 }
 
 function Invoke-SubReviewMode {
+   
     Test-Dependency @(
         @{ Name="mkvmerge"; Path=$mkvmergePath }
         @{ Name="ffprobe";  Path=$ffprobePath  }
@@ -427,7 +429,70 @@ function Save-Classification {
 function Get-Classification {
 }
 
+function Invoke-MetadataRemux {
+    
+    Test-Dependency @(
+        @{Name="FFmpeg";Path=$ffmpegPath}
+        @{Name="ffprobe";Path=$ffprobePath}
+    )
 
+    $files = Get-ChildItem -Path $metaSourceDir -Recurse | Where-Object { $_.Extension -match '\.(mkv|m4v|mp4)$' }
+    if (-not $files -or $files.Count -eq 0) { Write-Log "No files found in $metaSourceDir" -Color Red; return }
+    Write-Log "Found $($files.Count) files. Analyzing metadata..." -Color Cyan
 
+    $batchData = @()
+    foreach ($file in $files) {
+        Write-Log "Analyzing: $($file.Name)" -Color Yellow
+        $ffCmd = ((& $ffprobePath -v error -show_entries stream=index,codec_type:stream_tags=title,handler_name,language -of json "$($file.FullName)") -join "`n") | ConvertFrom-Json
+        $tracks = @()
+        foreach ($s in $ffCmd.streams) {
+            if ($s.codec_type -notin @("audio","subtitle")) { continue }
+            if ($s.tags.title)       { $existing=$s.tags.title;        $proposed=Get-ProposedTrackName $existing }
+            elseif ($s.tags.handler_name -and $s.tags.handler_name -notmatch "handler") { $existing=$s.tags.handler_name; $proposed=Get-ProposedTrackName $existing }
+            else { $lang=if($s.tags.language){$s.tags.language}else{"und"}; $existing="$lang $($s.codec_type)"; $proposed=$existing }
+            $tracks += [PSCustomObject]@{ Id=$s.index; Type=$s.codec_type; Language=if($s.tags.language){$s.tags.language}else{"und"}; CurrentName=$existing; NewName=""; ProposedName=$proposed }
+        }
+        $batchData += [PSCustomObject]@{ FileInfo=$file; Tracks=$tracks }
+    }
 
-Export-ModuleMember -Function Invoke-SubReviewMode, Save-Classification, Get-Classification, New-RemuxWithSubtitles, Invoke-EncodeMode
+    Write-Log "`nAnalysis complete. Starting user input phase..." -Color Cyan
+    foreach ($item in $batchData) {
+        Write-Log "`n=================================================" -Color Gray
+        Write-Log "FILE: $($item.FileInfo.Name)" -Color Green
+        Write-Log "=================================================" -Color Gray
+        foreach ($track in $item.Tracks) {
+            Write-Log "  Track $($track.Id) [$($track.Type)]" -Color Cyan
+            Write-Log "  Current:  " -NoNewline 
+            Write-Log "'$($track.CurrentName)'"  -Color Yellow
+            Write-Log "  Proposed: " -NoNewline
+            Write-Log "'$($track.ProposedName)'" -Color Yellow
+            $inp = Read-Host "  Enter name (Enter to accept proposed)"
+            $track.NewName = if ([string]::IsNullOrWhiteSpace($inp)) { $track.ProposedName } else { $inp }
+            Write-Log "  -> `"$($track.NewName)`""
+        }
+    }
+
+    Write-Log "`nStarting batch remux..." -Color Cyan
+    foreach ($item in $batchData) {
+        $relDir    = $item.FileInfo.DirectoryName.Replace($metaSourceDir,"").TrimStart('\')
+        $targetDir = Join-Path $metaOutputDir $relDir
+        if (-not (Test-Path $targetDir)) { New-Item $targetDir -ItemType Directory -Force | Out-Null }
+        $outPath = Join-Path $targetDir $item.FileInfo.Name
+
+        $ffArgs = @("-i", "`"$($item.FileInfo.FullName)`"", "-map", "0", "-c", "copy")
+        foreach ($track in $item.Tracks) {
+            if ($track.NewName) { $ffArgs += "-metadata:s:$($track.Id)"; $ffArgs += "title=`"$($track.NewName)`"" }
+        }
+        $ffArgs += "`"$outPath`""
+
+        Write-Log "Remuxing: $($item.FileInfo.Name)" -Color Yellow
+        if ($DryRun) { Write-Log "  [DRY RUN] ffmpeg $($ffArgs -join ' ')" -Color Gray; continue }
+
+        $proc = Start-Process -FilePath $ffmpegPath -ArgumentList $ffArgs -Wait -NoNewWindow -PassThru
+        if ($proc.ExitCode -eq 0) { Write-Log "  SUCCESS -> $outPath" -Color Green }
+        else                      { Write-Log "  FAILED (exit $($proc.ExitCode))" -Color Red }
+    }
+}
+
+# No save-classification, get-classification exported - theyre empty
+Export-ModuleMember -Function Invoke-SubReviewMode, Invoke-EncodeMode, Invoke-MetadataRemux

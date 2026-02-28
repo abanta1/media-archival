@@ -46,13 +46,11 @@ $mkvpropeditPath = Find-Tool "mkvpropedit.exe"  $searchRoots
 $handBrakePath   = Find-Tool "HandBrakeCLI.exe" $searchRoots
 $mediaInfoPath   = Find-Tool "MediaInfo.exe"    $searchRoots
 
-
-
 # ============================================
 # DISPATCH
 # ============================================
 if      ($SubReview)     { Invoke-SubReviewMode }
-elseif  ($MetadataRemux) { Test-Dependency @(@{Name="FFmpeg";Path=$ffmpegPath}; @{Name="ffprobe";Path=$ffprobePath}); Invoke-MetadataRemux }
+elseif  ($MetadataRemux) { Invoke-MetadataRemux }
 elseif  ($Encode)        { Invoke-EncodeMode }
 elseif  ($AnalyzeOnly)   { Invoke-EncodeMode }
 else {

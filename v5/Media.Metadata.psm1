@@ -1113,25 +1113,6 @@ function Get-ADAnalysis {
     }
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 function Get-QualityScore {
     param([string]$codec)
     if (-not $codec -or $null -eq $codec -or $codec -eq 0 -or $codec -eq "") { return 0 }
@@ -1187,4 +1168,5 @@ function Get-Vid {
     return $results
 }
 
-Export-ModuleMember -Function Get-Metadata, Get-RawMetadata, Get-SubtitleHash, Get-AudioLRA, Get-CenterRMS, Get-SpectralFlatness, Get-ADAnalysis
+# Other functions are isolated to this module, not exporting
+Export-ModuleMember -Function Get-Metadata, Get-Vid
