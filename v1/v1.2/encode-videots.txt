@@ -1,0 +1,20 @@
+$mkvs2 = Get-ChildItem -Recurse -Include VIDEO_TS
+foreach ($mkv2 in $mkvs2){
+$host.ui.RawUI.WindowTitle = "Encoding $($mkvs2.IndexOf($mkv2)+1)/$($mkvs2.Count) - $($mkv2.Parent.Name)"
+If (-not (Test-Path "$($mkv2.PSDrive.Root)\Encoded\$($mkv2.Parent.Name)")){
+Write-Host "-------------------------------------------------------------------------------Creating Encoded directory $($mkv2.psdrive.root)\Encoded\$($mkv2.parent.name)"
+New-Item "$($mkv2.psdrive.root)\Encoded\$($mkv2.parent.name)" -ItemType Directory
+}
+If (-not (Test-Path "$($mkv2.PSDrive.Root)\Garbage\$($mkv2.Parent.Name)")){
+New-Item "$($mkv2.psdrive.root)\Garbage\$($mkv2.parent.name)" -ItemType Directory
+Write-Host "-------------------------------------------------------------------------------Creating Garbage directory $($mkv2.psdrive.root)\Garbage\$($mkv2.parent.name)"
+}
+Write-Host """C:\Users\abanta\Downloads\HandBrakeCLI-1.5.1-win-x86_64\HandBrakeCLI.exe -Z ""Fast 1080p30"" -i ""$($mkv2.FullName)"" --main-feature -o ""$($mkv2.psdrive.root)Encoded\$($mkv2.parent.name)\$($mkv2.Parent.Name).m4v"""
+C:\Users\abanta\Downloads\HandBrakeCLI-1.5.1-win-x86_64\HandBrakeCLI.exe --preset-import-gui -Z "Fast 1080p30" -i "$($mkv2.FullName)" --main-feature -o "$($mkv2.psdrive.root)Encoded\$($mkv2.parent.name)\$($mkv2.Parent.Name).m4v"
+If ($?) {
+Write-Host "----------------------------------------------------------------------------------------------------------------Encode successful - Moving item to garbage"
+Move-Item "$($mkv2.FullName)" "$($mkv2.psdrive.root)\Garbage\$($mkv2.parent.name)\$($mkv2.Name).old"
+} else { Write-Host "---------------------------------------------------------------------------------------------------------------------Not encoded, not moving"
+}
+}
+$host.ui.RawUI.WindowTitle = "Windows PowerShell"
