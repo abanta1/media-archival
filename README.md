@@ -8,7 +8,7 @@ A collection of PowerShell scripts and modules used to rip, encode, and manage a
 
 - `Get-DVDTitle.ps1` – utility for fingerprinting a physical DVD/Blu‑Ray, extracting title information via **MakeMKV**, and searching for a match on **TMDb**, ripping video, and naming based on previous match.
 - `Find-Langs.ps1`, `ReorderAudio.ps1` – miscellaneous helpers used in v4 workflows.
-- `v1/`, `v2/`, `v3/`, `v4/` – historical versions of earlier scripts; each sub‑directory holds one or more past iterations.
+- `archive/v1/`, `archive/v2/`, `archive/v3/`, `archive/v4/` – historical versions of earlier scripts have been moved into an `archive` directory for clarity. Each sub‑directory holds one or more past iterations.
 - `v5/` – current library modules used by the present workflow:
   - `Claude-Modules.ps1` – central bootstrap module that imports the rest.
   - `Media.IO.psm1`, `Media.Metadata.psm1`, `Media.Normalize.psm1`, `Media.Process.psm1`, `Media.Workflows.psm1` – modular code for I/O, metadata handling, normalization and processing.
