@@ -15,23 +15,13 @@ function Invoke-EncodeMode {
 
     foreach ($vid in $vids[9]) {
         Write-Log " Processing ($($vids.IndexOf($vid)+1)/$($vids.Count)): $($vid.Name)" -Color Green
-Write-Log "DEBUG: vid.fullname $($vid.FullName)"
+
         try { $scan = Get-Metadata -VideoPath $vid.FullName }
         catch { $e = $_.Exception
             Write-Log "  CRITICAL ERROR scanning $($vid.Name) - skipping" -Color Red
             Write-Host "$e"
             continue
         }
-
-    if ($null -ne $scan){
-        Write-Host "scan type $($scan.GetType())"
-    } else {
-        Write-Host "WARN: No subs found" -ForegroundColor Yellow
-        Write-Host $scan
-        exit
-    }
-
-    Write-Host "DEBUG: scan audio tracks $($scan.Audio.Tracks)"
 
         $audioInfo = $scan.Audio
 		$adAnalysis = Get-ADAnalysis -AudioTracks $audioInfo.Tracks -FilePath $vid.FullName
@@ -55,15 +45,6 @@ Write-Log "DEBUG: vid.fullname $($vid.FullName)"
 
 		Write-Log "  Audio Strategy:" -Color Yellow
 
-
-    if ($null -ne $scan.Subtitles){
-    Write-Host $scan.Subtitles.GetType()
-    } else {
-        Write-Host "WARN: No subs found" -ForegroundColor Yellow
-        Write-Host $scan
-        exit
-    }
-
 		$audioStrategy = New-AudioStrategy -AudioTracks $audioInfo.Tracks
         $audioSummary  = ($audioStrategy.DescriptionList | ForEach-Object { $_.Trim() -replace "\r","" } | Where-Object { $_ -match '\S' }) -join "`n"
         Write-Log "  Subtitle Strategy:" -Color Yellow
@@ -74,13 +55,6 @@ Write-Log "DEBUG: vid.fullname $($vid.FullName)"
         if ($hasBitmap.Count -gt 0) { Write-Log "    Found $($hasBitmap.Count) bitmap subtitle tracks" -Color Yellow }
 
 		$primaryAudio = $audioInfo.Tracks[0]
-		
-if ($null -ne $subtitleTracks){
-Write-Host $subtitleTracks.GetType()
-} else {
-	Write-Host "WARN: No subs found" -ForegroundColor Yellow
-	exit
-}
 		
         $subPlan = New-SubtitleMuxPlan -SubTracks $subtitleTracks -PrimaryAudioIso $primaryAudio.IsoCode.Value
 		$effectiveBitmap = @($subPlan.Plan | Where-Object { $_.SourceType -eq 'Bitmap' })
