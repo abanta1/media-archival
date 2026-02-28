@@ -228,7 +228,6 @@ function Invoke-EncodeMode {
         $hbSubOrder = @()
 
         if ($sub.SubtitleList) {
-            $i = 1
             $keys = $sub.SubtitleList.Split(',') | ForEach-Object { $_.Trim() }
 
             foreach ($k in $keys) {
@@ -236,6 +235,7 @@ function Invoke-EncodeMode {
                 $classification = $sub.Classifications | Where-Object { $_.TrackKey -eq $k } | Select-Object -First 1
 
                 if ($track) {
+                    $hbIndex = [int]$k - $vid.AudioInfo.Tracks.Count
                     $trackName = if ($i -le $sub.Names.Count) { $sub.Names[$i-1] } else { "Unknown" }
 
                     $nameType = if ($classification) {
@@ -247,9 +247,8 @@ function Invoke-EncodeMode {
                     if ($classification.Forced) { $nameType += ", Forced" }
                     
                     Write-Log "    [$i] Track $k`: $trackName $nameType" -Color Cyan
-                    $hbSubOrder += $i
+                    $hbSubOrder += $hbIndex
                 }
-                $i++
             }
             $hbSubOrder = $hbSubOrder -split " " -join ","
         } else {

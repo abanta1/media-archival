@@ -8,7 +8,7 @@ function Get-Metadata {
     $raw          = Get-RawMetadata        -VideoPath $VideoPath
     $audio        = Merge-AudioMetadata    -RawMetaData $raw -Weights $weights
     $subs         = Merge-SubtitleMetadata -RawMetaData $raw -Weights $weights
-    $VideoPath    = Merge-VideoMetadata    -RawMetaData $raw -Weights $weights
+    $video        = Merge-VideoMetadata    -RawMetaData $raw -Weights $weights
 
     return [PSCustomObject]@{
         Subtitles = $subs
@@ -270,20 +270,20 @@ function Resolve-Field {
 function Merge-AudioMetadata {
     param([object]$RawMetaData, [hashtable]$Weights)
 
-    $hbAudioTracks = $Raw.HbAudio
-    $ffAudioTracks = $Raw.FfAudio
-    $mkvJAudioTracks = $Raw.MkvJAudio
-    $mkvIAudioTracks = $Raw.MkvIAudio
-    $miAudioTracks = $Raw.MiAudio
+    $hbAudioTracks = $RawMetaData.HbAudio
+    $ffAudioTracks = $RawMetaData.FfAudio
+    $mkvJAudioTracks = $RawMetaData.MkvJAudio
+    $mkvIAudioTracks = $RawMetaData.MkvIAudio
+    $miAudioTracks = $RawMetaData.MiAudio
 
     Write-Log "  Processing audio metadata..." -Color Green
     $normHbAudio = @()
     if ($hbAudioTracks) {
         foreach ($track in $hbAudioTracks) {
-            $trackLang = if (-not $track.Langauge) {
-                if ($track.LangaugeCode) {
-                    if ($track.LangaugeCode.Trim() -match '^[a-z]{2,3}$') {
-                        $l = Convert-IsoCode $track.LangaugeCode.Trim().ToLower()
+            $trackLang = if (-not $track.Language) {
+                if ($track.LanguageCode) {
+                    if ($track.LanguageCode.Trim() -match '^[a-z]{2,3}$') {
+                        $l = Convert-IsoCode $track.LanguageCode.Trim().ToLower()
                         $tIsoCode = $l
                         Convert-IsoToLanguage $l
                     } else { "Unknown" }
@@ -377,7 +377,7 @@ function Merge-AudioMetadata {
 
         $tCodec = Convert-AudioCodecName -codec $track.codec
         $quality = Get-QualityScore -codec $tCodec
-        $tChannel = switch ($track.channels) {
+        $tChannel = switch ($track.properties.audio_channels) {
                 { $_ -ge 7.1 } { "7.1" }
                 { $_ -ge 5.1 } { "5.1" }
                 { $_ -ge 2.0 } { "2.0" }
@@ -583,10 +583,10 @@ function Merge-AudioMetadata {
 function Merge-VideoMetadata {
 param([object]$RawMetaData, [hashtable]$Weights)
 
-    $hbVideoTracks = $Raw.HbVidio
-    $ffVideoTracks = $Raw.FfVidio
-    $mkvVideoTracks = $Raw.MkvJVidio
-    $miVideoTracks = $Raw.MiVidio
+    $hbVideoTracks = $RawMetaData.HbVideo
+    $ffVideoTracks = $RawMetaData.FfVideo
+    $mkvVideoTracks = $RawMetaData.MkvJVideo
+    $miVideoTracks = $RawMetaData.MiVideo
 
     $vidTracks = @()
     foreach ($track in $hbVideoTracks) {
@@ -618,11 +618,11 @@ param([object]$RawMetaData, [hashtable]$Weights)
 function Merge-SubtitleMetadata {
     param([object]$RawMetaData, [hashtable]$Weights)
 
-    $hbSubTracks = $Raw.HbSubs
-    $ffSubTracks = $Raw.FfSubs
-    $mkvJSubTracks = $Raw.MkvJSubs
-    $mkvISubTracks = $Raw.MkvISubs
-    $miSubTracks = $Raw.MiSubs
+    $hbSubTracks = $RawMetaData.HbSubs
+    $ffSubTracks = $RawMetaData.FfSubs
+    $mkvJSubTracks = $RawMetaData.MkvJSubs
+    $mkvISubTracks = $RawMetaData.MkvISubs
+    $miSubTracks = $RawMetaData.MiSubs
     
     Write-Log "  Processing subtitle metadata..." -Color Green
 
@@ -827,8 +827,8 @@ function Merge-SubtitleMetadata {
 
         $lang = Resolve-Field "Language" @{
              MediaInfo = $miTrack.Language
-             MKVMerge = $mkvJMatch.IsoCode
-             FFProbe = if ($ffMatch -and $ffMatch.tags) { $ffMatch.tags.language } else { $null }
+             MKVMerge = if ($mkvJMatch.IsoCode) { Convert-IsoToLanguage $mkvJMatch.IsoCode } else { $null }
+             FFProbe = $ffMatch.Language
              HandBrake = $hbMatch.Language
         } $weights
 
@@ -1058,8 +1058,8 @@ function Get-ADAnalysis {
 
     # Spectral flatness (stereo fallback)
     if ($eng[0].Channels.Value -le 2.0 -and $eng[1].Channels.Value -le 2.0) {
-        $sf1 = Get-SpectralFlatness -FilePath $FilePath -StreamIndex ($eng[0].TrackNum - 1)
-        $sf2 = Get-SpectralFlatness -FilePath $FilePath -StreamIndex ($eng[1].TrackNum - 1)
+        $sf1 = Get-SpectralFlatness -FilePath $FilePath -StreamIndex ($eng[0].TrackKey - 1)
+        $sf2 = Get-SpectralFlatness -FilePath $FilePath -StreamIndex ($eng[1].TrackKey - 1)
         $maxSF = [math]::Max($sf1, $sf2)
         $f1_sf = ($maxSF - $sf1) * 10
         $f2_sf = ($maxSF - $sf2) * 10
