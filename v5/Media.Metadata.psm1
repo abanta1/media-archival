@@ -1169,4 +1169,4 @@ function Get-Vid {
 }
 
 # Other functions are isolated to this module, not exporting
-Export-ModuleMember -Function Get-Metadata, Get-Vid
+Export-ModuleMember -Function Get-Metadata, Get-Vid, Get-ADAnalysis

@@ -14,7 +14,7 @@ function Invoke-EncodeMode {
     $FullEncodingPlan = @()
     Write-Log "`n---------------------------- PRE-FLIGHT ANALYSIS --------------------------------" -Color Cyan
 
-    foreach ($vid in $vids[9]) {
+    foreach ($vid in $vids) {
         Write-Log " Processing ($($vids.IndexOf($vid)+1)/$($vids.Count)): $($vid.Name)" -Color Green
 
         try { $scan = Get-Metadata -VideoPath $vid.FullName }
@@ -291,7 +291,7 @@ function Invoke-EncodeMode {
         }
 
         #Write-Host "DEBUG: hbargs $hbArgs"
-        exit
+        #exit
         
         & $handBrakePath @hbArgs 2>> $logFile 3>$null
         $failed = $false
