@@ -448,7 +448,6 @@ function Merge-AudioMetadata {
     # Merge ffprobe, mkvmerge, MediaInfo with HandBrake data and apply hybrid scoring to resolve conflicts
 
     $tracks = @()
-    $index = 0
 
     foreach ($track in $ffAudioTracks) {
 
