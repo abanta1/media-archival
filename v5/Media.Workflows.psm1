@@ -452,11 +452,6 @@ function Export-SubtitleTrack {
 function New-RemuxWithSubtitles {
 }
 
-
-
-
-
-
 function Get-UserClassification {
     param([string]$FileName, [array]$Subtitles, [object]$ExistingClassification)
 
@@ -563,13 +558,5 @@ function Get-UserClassification {
     
     return $classifications
 }
-
-
-
-
-
-
-
-
 
 Export-ModuleMember -Function New-AudioStrategy, New-SubtitleMuxPlan, Get-SubtitleClassification, Get-UserClassification, Get-ProposedTrackName

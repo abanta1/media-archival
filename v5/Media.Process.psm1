@@ -15,7 +15,7 @@ function Invoke-EncodeMode {
 
     foreach ($vid in $vids[9]) {
         Write-Log " Processing ($($vids.IndexOf($vid)+1)/$($vids.Count)): $($vid.Name)" -Color Green
-        
+Write-Log "DEBUG: vid.fullname $($vid.FullName)"
         try { $scan = Get-Metadata -VideoPath $vid.FullName }
         catch { $e = $_.Exception
             Write-Log "  CRITICAL ERROR scanning $($vid.Name) - skipping" -Color Red
@@ -24,13 +24,14 @@ function Invoke-EncodeMode {
         }
 
     if ($null -ne $scan){
-    Write-Host $scan.GetType()
+        Write-Host "scan type $($scan.GetType())"
     } else {
         Write-Host "WARN: No subs found" -ForegroundColor Yellow
         Write-Host $scan
         exit
     }
 
+    Write-Host "DEBUG: scan audio tracks $($scan.Audio.Tracks)"
 
         $audioInfo = $scan.Audio
 		$adAnalysis = Get-ADAnalysis -AudioTracks $audioInfo.Tracks -FilePath $vid.FullName

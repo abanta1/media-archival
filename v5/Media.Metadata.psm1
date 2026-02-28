@@ -5,15 +5,15 @@ function Get-Metadata {
 
     $weights = @{ HandBrake = 1; MediaInfo = 3; MKVMerge = 4; FFProbe = 5 }
 
-    Get-RawMetadata     -VideoPath $VideoPath
-    $unifiedAudio = Merge-AudioMetadata    -VideoPath $VideoPath -Weights $weights
-    $unifiedSubs  = Merge-SubtitleMetadata -VideoPath $VideoPath -Weights $weights
-    $unifiedVideo = $vidTracks
+    $raw          = Get-RawMetadata        -VideoPath $VideoPath
+    $audio        = Merge-AudioMetadata    -RawMetaData $raw -Weights $weights
+    $subs         = Merge-SubtitleMetadata -RawMetaData $raw -Weights $weights
+    $VideoPath    = Merge-VideoMetadata    -RawMetaData $raw -Weights $weights
 
     return [PSCustomObject]@{
-        Subtitles = $unifiedSubs
-        Audio     = $unifiedAudio
-        Video     = $unifiedVideo
+        Subtitles = $subs
+        Audio     = $audio
+        Video     = $video
     }
 }
 
@@ -52,7 +52,6 @@ function Get-RawMetadata {
     $ffSubTracks = @()
     $mkvJAudioTracks = @()
     $mkvIAudioTracks = @()
-
 
     Write-Log "   Retreiving HandBrake metadata" -Color Yellow
     $hbRawJson = & $handBrakePath --scan -i $VideoPath --json 2>&1
@@ -180,7 +179,6 @@ function Get-RawMetadata {
         $mkvISubTracks[$i] | Add-Member -MemberType NoteProperty -Name "TrackKey" -Value ($mkvIAudioTracks.Count + $i + 1)
     }
 
-    
     Write-Log "   Retreiving MediaInfo metadata" -Color Yellow
     # MediaInfo metadata scan
     $rawMi = (& $mediainfoPath --Output=JSON "$VideoPath") -join "`n"
@@ -200,6 +198,24 @@ function Get-RawMetadata {
     }
     for ($i = 0; $i -lt $miSubTracks.Count; $i++) {
         $miSubTracks[$i] | Add-Member -MemberType NoteProperty -Name "TrackKey" -Value ($miAudioTracks.Count + $i + 1)
+    }
+
+    return [PSCustomObject]@{
+        HbAudio = $hbAudioTracks
+        HbSubs = $hbSubTracks
+        HbVideo = $hbVideoRes
+        FfAudio = $ffAudioTracks
+        FfSubs = $ffSubTracks
+        FfVideo = $ffVideoRes
+        FfPackets = $ffPacketInfo
+        MkvJAudio = $mkvJAudioTracks
+        MkvJSubs = $mkvJSubTracks
+        MkvJVideo = $mkvVideoRes
+        MkvIAudio = $mkvIAudioTracks
+        MkvISubs = $mkvISubTracks
+        MiAudio = $miAudioTracks
+        MiSubs = $miSubTracks
+        MiVideo = $miVideoRes
     }
 }
 
@@ -252,9 +268,14 @@ function Resolve-Field {
 }
 
 function Merge-AudioMetadata {
-    param([string]$VideoPath, [hashtable]$Weights)
+    param([object]$RawMetaData, [hashtable]$Weights)
 
-    Write-Log "  Processing audio metadata..." -Color Green
+    $hbAudioTracks = $Raw.HbAudio
+    $ffAudioTracks = $Raw.FfAudio
+    $mkvJAudioTracks = $Raw.MkvJAudio
+    $mkvIAudioTracks = $Raw.MkvIAudio
+    $miAudioTracks = $Raw.MiAudio
+
     Write-Log "  Processing audio metadata..." -Color Green
     $normHbAudio = @()
     if ($hbAudioTracks) {
@@ -426,37 +447,6 @@ function Merge-AudioMetadata {
 
     # Merge ffprobe, mkvmerge, MediaInfo with HandBrake data and apply hybrid scoring to resolve conflicts
 
-    $weights = @{
-        HandBrake = 1
-        MediaInfo = 3
-        MKVMerge = 4
-        FFProbe = 5
-    }
-
-    $vidTracks = @()
-    foreach ($track in $hbVideoRes) {
-        $height = Resolve-Field "Video Height" @{
-            HandBrake = $track.Height
-            MediaInfo = $miVideoRes.Height
-            MKVMerge = $mkvVideoRes.Height
-            FFProbe = $ffVideoRes.Height
-         } $weights
-
-         $width = Resolve-Field "Video Width" @{
-            HandBrake = $track.Width
-            MediaInfo = $miVideoRes.Width
-            MKVMerge = $mkvVideoRes.Width
-            FFProbe = $ffVideoRes.Width
-         } $weights
-
-         $vidTracks += [PSCustomObject]@{
-            Width = $width
-            Height = $height
-        }
-    }
-
-    $unifiedVideo = $vidTracks
-
     $tracks = @()
     $index = 0
 
@@ -590,8 +580,49 @@ function Merge-AudioMetadata {
     return $unifiedAudio
 }
 
+function Merge-VideoMetadata {
+param([object]$RawMetaData, [hashtable]$Weights)
+
+    $hbVideoTracks = $Raw.HbVidio
+    $ffVideoTracks = $Raw.FfVidio
+    $mkvVideoTracks = $Raw.MkvJVidio
+    $miVideoTracks = $Raw.MiVidio
+
+    $vidTracks = @()
+    foreach ($track in $hbVideoTracks) {
+        $height = Resolve-Field "Video Height" @{
+            HandBrake = $track.Height
+            MediaInfo = $miVideoTracks.Height
+            MKVMerge = $mkvVideoTracks.Height
+            FFProbe = $ffVideoTracks.Height
+         } $weights
+
+         $width = Resolve-Field "Video Width" @{
+            HandBrake = $track.Width
+            MediaInfo = $miVideoTracks.Width
+            MKVMerge = $mkvVideoTracks.Width
+            FFProbe = $ffVideoTracks.Width
+         } $weights
+
+         $vidTracks += [PSCustomObject]@{
+            Width = $width
+            Height = $height
+        }
+    }
+
+    $unifiedVideo = $vidTracks
+
+    return $unifiedVideo
+}
+
 function Merge-SubtitleMetadata {
-    param([string]$VideoPath, [hashtable]$Weights)
+    param([object]$RawMetaData, [hashtable]$Weights)
+
+    $hbSubTracks = $Raw.HbSubs
+    $ffSubTracks = $Raw.FfSubs
+    $mkvJSubTracks = $Raw.MkvJSubs
+    $mkvISubTracks = $Raw.MkvISubs
+    $miSubTracks = $Raw.MiSubs
 
     Write-Log "  Processing subtitle metadata..." -Color Green
     #
@@ -603,6 +634,7 @@ function Merge-SubtitleMetadata {
     $normHbSubs = @()
     foreach ($track in $hbSubTracks) {
         $tsType = Convert-SubCodecType $track.Format
+
         if ($tsType -eq "bitmap") {
             $tIsText = $false
         } elseif ($tsType -eq "text") {

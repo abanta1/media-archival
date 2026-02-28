@@ -13,11 +13,11 @@ param(
 )
 
 $moduleName = @(
-	"MediaToolkit.psm1",
-	"MediaNormalization.psm1",
-	"MediaAnalysis.psm1",
-	"MediaWorkflows.psm1",
-	"MediaProcess.psm1"
+	"Media.IO.psm1",
+	"Media.Normalize.psm1",
+	"Media.Metadata.psm1",
+	"Media.Workflows.psm1",
+	"Media.Process.psm1"
 )
 
 foreach ($module in $moduleName){
