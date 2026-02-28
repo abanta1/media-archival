@@ -42,7 +42,8 @@ function Test-Dependency {
 
     Write-Log "`nChecking dependencies..." -Color Cyan
     $missing = foreach ($dep in $Deps) {
-        if (-not (Test-Path $dep.Path)) { 
+        $exists = (Test-Path $dep.Path -PathType Leaf)
+        if (-not $exists) { 
             Write-Log "[-] $($dep.Name) NOT FOUND at: $($dep.Path)" -Color Yellow
             $dep.Name
         } else {

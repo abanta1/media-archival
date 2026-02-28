@@ -1,11 +1,24 @@
 function Get-Metadata {
-    param([string]$VideoPath)
+    param(
+        [string]$VideoPath,
+        [string]$handBrakePath,
+        [string]$ffprobePath,
+        [string]$mkvmergePath,
+        [string]$mediaInfoPath,
+        [string]$ffmpegPath
+    )
 
-    Write-Log "  Detecting metadata with multiple tools..." -Color Yellow
+    # high-level entry; raw metadata retrieval will log tool details
+    Write-Log "  Gathering metadata from various sources..." -Color Yellow
 
     $weights = @{ HandBrake = 1; MediaInfo = 3; MKVMerge = 4; FFProbe = 5 }
 
-    $raw          = Get-RawMetadata        -VideoPath $VideoPath
+    $raw          = Get-RawMetadata        -VideoPath $VideoPath `
+                                         -handBrakePath $handBrakePath `
+                                         -ffprobePath $ffprobePath `
+                                         -mkvmergePath $mkvmergePath `
+                                         -mediaInfoPath $mediaInfoPath `
+                                         -ffmpegPath $ffmpegPath
     $audio        = Merge-AudioMetadata    -RawMetaData $raw -Weights $weights
     $subs         = Merge-SubtitleMetadata -RawMetaData $raw -Weights $weights
     $video        = Merge-VideoMetadata    -RawMetaData $raw -Weights $weights
@@ -18,7 +31,14 @@ function Get-Metadata {
 }
 
 function Get-RawMetadata {
-    param([string]$VideoPath)
+    param(
+        [string]$VideoPath,
+        [string]$handBrakePath,
+        [string]$ffprobePath,
+        [string]$mkvmergePath,
+        [string]$mediaInfoPath,
+        [string]$ffmpegPath
+    )
     
     # Scan Once
     
@@ -53,11 +73,22 @@ function Get-RawMetadata {
     $mkvJAudioTracks = @()
     $mkvIAudioTracks = @()
 
-    Write-Log "   Retreiving HandBrake metadata" -Color Yellow
-    $hbRawJson = & $handBrakePath --scan -i $VideoPath --json 2>&1
-    $hbJsonMarker = 'JSON Title Set:'
-    $hbJoined = $hbRawJson -join "`n"
-    $parts = $hbJoined -split [regex]::Escape($hbJsonMarker), 2
+    if ($handBrakePath -and (Test-Path $handBrakePath -PathType Leaf)) {
+        Write-Log "   Retreiving HandBrake metadata" -Color Yellow
+        try {
+            $hbRawJson = & $handBrakePath --scan -i $VideoPath --json 2>&1
+        } catch {
+            Write-Log "  WARNING: HandBrake scan failed: $_" -Color Yellow
+            $hbRawJson = @()
+        }
+        $hbJsonMarker = 'JSON Title Set:'
+        $hbJoined = $hbRawJson -join "`n"
+        $parts = $hbJoined -split [regex]::Escape($hbJsonMarker), 2
+    } else {
+        Write-Log "   HandBrake path not set or invalid (not a file), skipping scan" -Color Yellow
+        $hbRawJson = @()
+        $parts = @()
+    }
 
     if ($parts.Count -eq 2) {
         $hbJsonContent = ($parts[1] -split 'HandBrake has exited\.', 2)[0].Trim()
@@ -76,8 +107,14 @@ function Get-RawMetadata {
         Width = $hbJson.TitleList.Geometry.Width    
         Height = $hbJson.TitleList.Geometry.Height
     }
-    $hbAudioTracks = @($hbJson.TitleList.AudioList)
-    $hbSubTracks = @($hbJson.TitleList.SubtitleList)
+    
+    if ($hbJson -and $hbJson.TitleList) {
+        $hbAudioTracks = @($hbJson.TitleList.AudioList)
+        $hbSubTracks = @($hbJson.TitleList.SubtitleList)
+    } else {
+        $hbAudioTracks = @()
+        $hbSubTracks = @()
+    }
 
     # Assign Track Key for HB
     for ($i = 0; $i -lt $hbAudioTracks.Count; $i++) {
@@ -88,41 +125,52 @@ function Get-RawMetadata {
     }
 
     Write-Log "   Retreiving ffmpeg metadata" -Color Yellow
-    # ffprobe metadata scan
-    # $ff = & $ffprobePath -v error -show_streams "$VideoPath"
-    $ffPackets = & $ffprobePath -v error -count_packets -show_entries stream=index,codec_type,nb_read_packets -of default=noprint_wrappers=1 "$VideoPath" 2>&1
     $ffPacketInfo = @()
-    for ($i = 0; $i -lt $ffPackets.Count; $i += 3) {
-        $indexLine = $ffPackets[$i]
-        $codecLine = $ffPackets[$i + 1]
-        $packetLine = $ffPackets[$i + 2]
+    $ffVideoRes = $null
 
-        $index = ($indexLine -split '=')[1].Trim()
-        $codec = ($codecLine -split '=')[1].Trim()
-        $packets = ($packetLine -split '=')[1].Trim()
+    if ($ffprobePath -and (Test-Path $ffprobePath -PathType Leaf)) {
+        # ffprobe metadata scan
+        $ffPackets = & $ffprobePath -v error -count_packets -show_entries stream=index,codec_type,nb_read_packets -of default=noprint_wrappers=1 "$VideoPath" 2>&1
         
-        $ffPacketInfo += [PSCustomObject]@{
-            Index = [int]$index
-            CodecType = $codec
-            PacketCount = [int]$packets
-            TrackKey = 0
+        for ($i = 0; $i -lt $ffPackets.Count; $i += 3) {
+            $indexLine = $ffPackets[$i]
+            $codecLine = $ffPackets[$i + 1]
+            $packetLine = $ffPackets[$i + 2]
+
+            $index = ($indexLine -split '=')[1].Trim()
+            $codec = ($codecLine -split '=')[1].Trim()
+            $packets = ($packetLine -split '=')[1].Trim()
+            
+            $ffPacketInfo += [PSCustomObject]@{
+                Index = [int]$index
+                CodecType = $codec
+                PacketCount = [int]$packets
+                TrackKey = 0
+            }
         }
+
+        # Assign Track Key for ffprobe packet info
+        for ($i = 1; $i -lt $ffPacketInfo.Count; $i++) {
+            $ffPacketInfo[$i].TrackKey = ($i)
+        }
+
+        try {
+            $ffJson = ((& $ffprobePath -v error -show_streams -of json "$VideoPath") -join "`n") | ConvertFrom-Json
+        } catch {
+            Write-Log "ERROR: Failed to parse ffprobe JSON" -Color Red
+            $ffJson = $null
+        }
+
+        $ffVideoRes = [PSCustomObject]@{
+            Width = ($ffJson.streams | Where-Object { $_.codec_type -eq "video" } | Select-Object -First 1 | ForEach-Object { $_.width })
+            Height = ($ffJson.streams | Where-Object { $_.codec_type -eq "video" } | Select-Object -First 1 | ForEach-Object { $_.height })
+        }
+        $ffAudioTracks = @($ffJson.streams | Where-Object codec_type -eq "audio")
+        $ffSubTracks = @($ffJson.streams | Where-Object { $_.codec_type -eq "subtitle" })
+    } else {
+        Write-Log "   WARNING: ffprobe path not set or invalid, skipping" -Color Yellow
+        $ffJson = $null
     }
-
-    # Assign Track Key for ffprobe packet info
-    for ($i = 1; $i -lt $ffPacketInfo.Count; $i++) {
-        $ffPacketInfo[$i].TrackKey = ($i)
-    }
-
-    $ffJson = ((& $ffprobePath -v error -show_streams -of json "$VideoPath") -join "`n") | ConvertFrom-Json
-
-    $ffVideoRes = [PSCustomObject]@{
-        Width = ($ffJson.streams | Where-Object { $_.codec_type -eq "video" } | Select-Object -First 1 | ForEach-Object { $_.width })
-        Height = ($ffJson.streams | Where-Object { $_.codec_type -eq "video" } | Select-Object -First 1 | ForEach-Object { $_.height })
-    }
-    $ffAudioTracks = @($ffJson.streams | Where-Object codec_type -eq "audio")
-
-    $ffSubTracks = @($ffJson.streams | Where-Object { $_.codec_type -eq "subtitle" })
 
     # Assign Track Key for ffprobe
     for ($i = 0; $i -lt $ffAudioTracks.Count; $i++) {
@@ -133,43 +181,54 @@ function Get-RawMetadata {
     }
 
     Write-Log "   Retreiving MKVMerge metadata" -Color Yellow
-    # mkvmerge json metadata scan
-    $mkvJson = ((& $mkvmergePath -J "$VideoPath") -join "`n") | ConvertFrom-Json
+    $mkvVideoRes = $null
 
-    $mkvVideoRes = [PSCustomObject]@{
-        Width = ($mkvJson.tracks | Where-Object { $_.type -eq "video" } | Select-Object -First 1 | ForEach-Object { $_.properties.pixel_dimensions }) -split 'x' | Select-Object -First 1
-        Height = ($mkvJson.tracks | Where-Object { $_.type -eq "video" } | Select-Object -First 1 | ForEach-Object { $_.properties.pixel_dimensions }) -split 'x' | Select-Object -Last 1
-    }
-    $mkvJAudioTracks = @($mkvJson.tracks | Where-Object { $_.type -eq "audio" })
-    $mkvJSubTracks = @($mkvJson.tracks | Where-Object { $_.type -eq "subtitles" })
-
-    # Assign Track Key for MKV-J
-    for ($i = 0; $i -lt $mkvJAudioTracks.Count; $i++) {
-        $mkvJAudioTracks[$i] | Add-Member -MemberType NoteProperty -Name "TrackKey" -Value ($i + 1)
-    }
-    for ($i = 0; $i -lt $mkvJSubTracks.Count; $i++) {
-        $mkvJSubTracks[$i] | Add-Member -MemberType NoteProperty -Name "TrackKey" -Value ($mkvJAudioTracks.Count + $i + 1)
-    }
-
-    # mkvmerge -i metadata scan
-    $mkvI = & $mkvmergePath -i "$VideoPath" 2>&1
-    $mkvIAudioTracks = @(foreach ($line in $mkvI) {
-        if ($line -match '^Track ID (\d+): audio \((.+)\)$') {
-            [PSCustomObject]@{
-                MKVTrackID = [int]$matches[1]
-                Type = $matches[2].ToLower()
-            }
+    if ($mkvmergePath -and (Test-Path $mkvmergePath -PathType Leaf)) {
+        # mkvmerge json metadata scan
+        try {
+            $mkvJson = ((& $mkvmergePath -J "$VideoPath") -join "`n") | ConvertFrom-Json
+        } catch {
+            Write-Log "ERROR: Failed to parse mkvmerge JSON" -Color Red
+            $mkvJson = $null
         }
-    })
 
-    $mkvISubTracks = @(foreach ($line in $mkvI) {
-        if ($line -match '^Track ID (\d+): subtitles \((.+)\)$') {
-            [PSCustomObject]@{
-                MKVTrackID = [int]$matches[1]
-                Type = $matches[2].ToLower()
-            }
+        $mkvVideoRes = [PSCustomObject]@{
+            Width = ($mkvJson.tracks | Where-Object { $_.type -eq "video" } | Select-Object -First 1 | ForEach-Object { $_.properties.pixel_dimensions }) -split 'x' | Select-Object -First 1
+            Height = ($mkvJson.tracks | Where-Object { $_.type -eq "video" } | Select-Object -First 1 | ForEach-Object { $_.properties.pixel_dimensions }) -split 'x' | Select-Object -Last 1
         }
-    })
+        $mkvJAudioTracks = @($mkvJson.tracks | Where-Object { $_.type -eq "audio" })
+        $mkvJSubTracks = @($mkvJson.tracks | Where-Object { $_.type -eq "subtitles" })
+
+        # Assign Track Key for MKV-J
+        for ($i = 0; $i -lt $mkvJAudioTracks.Count; $i++) {
+            $mkvJAudioTracks[$i] | Add-Member -MemberType NoteProperty -Name "TrackKey" -Value ($i + 1)
+        }
+        for ($i = 0; $i -lt $mkvJSubTracks.Count; $i++) {
+            $mkvJSubTracks[$i] | Add-Member -MemberType NoteProperty -Name "TrackKey" -Value ($mkvJAudioTracks.Count + $i + 1)
+        }
+
+        # mkvmerge -i metadata scan
+        $mkvI = & $mkvmergePath -i "$VideoPath" 2>&1
+        $mkvIAudioTracks = @(foreach ($line in $mkvI) {
+            if ($line -match '^Track ID (\d+): audio \((.+)\)$') {
+                [PSCustomObject]@{
+                    MKVTrackID = [int]$matches[1]
+                    Type = $matches[2].ToLower()
+                }
+            }
+        })
+
+        $mkvISubTracks = @(foreach ($line in $mkvI) {
+            if ($line -match '^Track ID (\d+): subtitles \((.+)\)$') {
+                [PSCustomObject]@{
+                    MKVTrackID = [int]$matches[1]
+                    Type = $matches[2].ToLower()
+                }
+            }
+        })
+    } else {
+        Write-Log "   WARNING: mkvmerge path not set or invalid, skipping" -Color Yellow
+    }
 
     # Assign Track Key for MKV-I
     for ($i = 0; $i -lt $mkvIAudioTracks.Count; $i++) {
@@ -180,17 +239,28 @@ function Get-RawMetadata {
     }
 
     Write-Log "   Retreiving MediaInfo metadata" -Color Yellow
-    # MediaInfo metadata scan
-    $rawMi = (& $mediainfoPath --Output=JSON "$VideoPath") -join "`n"
-    $miJson = $rawMi | ConvertFrom-Json
+    $miVideoRes = $null
 
-    $miVideoRes = [PSCustomObject]@{
-        Width = $miJson.media.track | Where-Object { $_.'@type' -eq "Video" } | Select-Object -First 1 | ForEach-Object { $_.Width }
-        Height = $miJson.media.track | Where-Object { $_.'@type' -eq "Video" } | Select-Object -First 1 | ForEach-Object { $_.Height }
+    if ($mediaInfoPath -and (Test-Path $mediaInfoPath -PathType Leaf)) {
+        # MediaInfo metadata scan
+        $rawMi = (& $mediainfoPath --Output=JSON "$VideoPath") -join "`n"
+        try {
+            $miJson = $rawMi | ConvertFrom-Json
+        } catch {
+            Write-Log "ERROR: Failed to parse MediaInfo JSON" -Color Red
+            $miJson = $null
+        }
+
+        $miVideoRes = [PSCustomObject]@{
+            Width = $miJson.media.track | Where-Object { $_.'@type' -eq "Video" } | Select-Object -First 1 | ForEach-Object { $_.Width }
+            Height = $miJson.media.track | Where-Object { $_.'@type' -eq "Video" } | Select-Object -First 1 | ForEach-Object { $_.Height }
+        }
+
+        $miAudioTracks = @($miJson.media.track | Where-Object { $_.'@type' -eq "Audio" })
+        $miSubTracks = @($miJson.media.track | Where-Object { $_.'@type' -eq "Text" })
+    } else {
+        Write-Log "   WARNING: MediaInfo path not set or invalid, skipping" -Color Yellow
     }
-
-    $miAudioTracks = @($miJson.media.track | Where-Object { $_.'@type' -eq "Audio" })
-    $miSubTracks = @($miJson.media.track | Where-Object { $_.'@type' -eq "Text" })
 
     # Assign Track Key for MediaInfo
     for ($i = 0; $i -lt $miAudioTracks.Count; $i++) {
@@ -957,7 +1027,16 @@ function Get-SubtitleHash (){
 }
 
 function Get-AudioLRA {
-    param([string]$FilePath, [int]$StreamIndex)
+    param(
+        [string]$FilePath,
+        [int]$StreamIndex,
+        [string]$ffmpegPath
+    )
+
+    if (-not ($ffmpegPath -and (Test-Path $ffmpegPath -PathType Leaf))) {
+        Write-Log "  WARNING: ffmpeg path invalid; LRA unavailable" -Color Yellow
+        return 0
+    }
 
     $cmd = "`"$ffmpegPath`" -t 180 -i `"$FilePath`" -map 0:a:$StreamIndex -af ebur128 -f null - 2>&1"
     $out = cmd /c $cmd
@@ -974,7 +1053,16 @@ function Get-AudioLRA {
 }
 
 function Get-CenterRMS {
-    param([string]$FilePath, [int]$TrackKey)
+    param(
+        [string]$FilePath,
+        [int]$TrackKey,
+        [string]$ffmpegPath
+    )
+
+    if (-not ($ffmpegPath -and (Test-Path $ffmpegPath -PathType Leaf))) {
+        Write-Log "  WARNING: ffmpeg path invalid; RMS unavailable" -Color Yellow
+        return 0
+    }
 
     $cmd = "`"$ffmpegPath`" -t 180 -i `"$FilePath`" -map 0:a:$TrackKey -af ebur128 -f null - 2>&1"
     $out = cmd /c $cmd
@@ -991,8 +1079,14 @@ function Get-CenterRMS {
 function Get-SpectralFlatness {
     param(
         [string]$FilePath,
-        [int]$StreamIndex
+        [int]$StreamIndex,
+        [string]$ffmpegPath
     )
+
+    if (-not ($ffmpegPath -and (Test-Path $ffmpegPath -PathType Leaf))) {
+        Write-Log "  WARNING: ffmpeg path invalid; spectral flatness unavailable" -Color Yellow
+        return 0.0
+    }
 
     $cmd = "`"$ffmpegPath`" -t 60 -i `"$FilePath`" -map 0:a:$StreamIndex -af `"astats=metadata=1:reset=1`" -f null - 2>&1"
     $out = cmd /c $cmd
@@ -1014,7 +1108,8 @@ function Get-SpectralFlatness {
 function Get-ADAnalysis {
     param(
         [array]$AudioTracks,
-        [string]$FilePath
+        [string]$FilePath,
+        [string]$ffmpegPath
     )
 
     Write-Log " Detecting AD Track (unified)..." -Color Yellow
@@ -1038,8 +1133,8 @@ function Get-ADAnalysis {
     # Center RMS (5.1+)
     Write-Log "  Center channel RMS..." -Color Yellow
     if ($eng[0].Channels.Value -ge 5.1 -and $eng[1].Channels.Value -ge 5.1) {
-        $r1 = Get-CenterRMS -FilePath $FilePath -TrackKey ($eng[0].TrackKey - 1)
-        $r2 = Get-CenterRMS -FilePath $FilePath -TrackKey ($eng[1].TrackKey - 1)
+        $r1 = Get-CenterRMS -FilePath $FilePath -TrackKey ($eng[0].TrackKey - 1) -ffmpegPath $ffmpegPath
+        $r2 = Get-CenterRMS -FilePath $FilePath -TrackKey ($eng[1].TrackKey - 1) -ffmpegPath $ffmpegPath
         $maxR = [math]::Max($r1, $r2)
         $f1_rms = ($maxR - $r1) / 10
         $f2_rms = ($maxR - $r2) / 10
@@ -1049,16 +1144,16 @@ function Get-ADAnalysis {
 
     # LRA
     Write-Log "  Loudness Range (LRA)..." -Color Yellow
-    $l1 = Get-AudioLRA -FilePath $FilePath -StreamIndex ($eng[0].TrackKey - 1)
-    $l2 = Get-AudioLRA -FilePath $FilePath -StreamIndex ($eng[1].TrackKey - 1)
+    $l1 = Get-AudioLRA -FilePath $FilePath -StreamIndex ($eng[0].TrackKey - 1) -ffmpegPath $ffmpegPath
+    $l2 = Get-AudioLRA -FilePath $FilePath -StreamIndex ($eng[1].TrackKey - 1) -ffmpegPath $ffmpegPath
     $maxL = [math]::Max($l1, $l2)
     $f1_lra = ($maxL - $l1)
     $f2_lra = ($maxL - $l2)
 
     # Spectral flatness (stereo fallback)
     if ($eng[0].Channels.Value -le 2.0 -and $eng[1].Channels.Value -le 2.0) {
-        $sf1 = Get-SpectralFlatness -FilePath $FilePath -StreamIndex ($eng[0].TrackKey - 1)
-        $sf2 = Get-SpectralFlatness -FilePath $FilePath -StreamIndex ($eng[1].TrackKey - 1)
+        $sf1 = Get-SpectralFlatness -FilePath $FilePath -StreamIndex ($eng[0].TrackKey - 1) -ffmpegPath $ffmpegPath
+        $sf2 = Get-SpectralFlatness -FilePath $FilePath -StreamIndex ($eng[1].TrackKey - 1) -ffmpegPath $ffmpegPath
         $maxSF = [math]::Max($sf1, $sf2)
         $f1_sf = ($maxSF - $sf1) * 10
         $f2_sf = ($maxSF - $sf2) * 10
@@ -1152,7 +1247,8 @@ function Get-ExtractedSubtitle {
 }
 
 function Get-Vid {
-    param([Parameter(mandatory=$true)][string]$SrcDirPath)
+    param([Parameter(mandatory=$true)][string]$SrcDirPath,[int]$VidCountIn)
+
     $results = @(Get-ChildItem -Path "$SrcDirPath" -Recurse -Include *.mkv,VIDEO_TS | Where-Object {
         $folderPart    = if ($_.Name -eq 'VIDEO_TS') { $_.Parent.Name }    else { $_.Directory.Name }
         $baseNamePart  = if ($_.Name -eq 'VIDEO_TS') { $_.Parent.Name }    else { $_.BaseName }
@@ -1162,6 +1258,9 @@ function Get-Vid {
         if ($exists) { Write-Log "    Skipping `"$baseNamePart`" - already exists" -Color Red }
         -not $exists
     } | Sort-Object { $_.Name -ne 'VIDEO_TS' }, Length)
+    if ($VidCountIn -gt 0){
+        $results = $results | Select-Object -First $VidCountIn
+    }
     Write-Log "Found $($results.Count) videos to encode"
     if ($results.Count -eq 0) { Write-Log "No videos to encode, exiting" -Color Yellow; return @() }
     return $results

@@ -4,6 +4,7 @@ param(
     [switch]$SubReview,
     [switch]$MetadataRemux,
     [switch]$DryRun,
+	[int]$VidCountIn,
 	[Parameter(mandatory=$true)]
 	[string]$SrcDir,
 	[Parameter(mandatory=$true)]
@@ -11,6 +12,7 @@ param(
 	[Parameter(mandatory=$true)]
 	[string]$GbgDir
 )
+Write-Host "DEBUG: vidcount $VidCountIn"
 
 $moduleName = @(
 	"Media.IO.psm1",
@@ -27,7 +29,9 @@ foreach ($module in $moduleName){
 
 [Console]::InputEncoding  = [System.Text.Encoding]::UTF8
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+if (-not $PSDefaultParameterValues) { $PSDefaultParameterValues = @{} }
 $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
+
 
 $vobsubDir           = $SrcDir         # SubReview: input folder
 $encodedBaseDir      = $DstDir         # SubReview: output root
@@ -35,6 +39,7 @@ $garbageBaseDir      = $GbgDir         # SubReview: garbage root
 $classificationsFile = ".\vobsub_classifications.json"
 $metaSourceDir       = $SrcDir         # MetadataRemux: input
 $metaOutputDir       = $DstDir         # MetadataRemux: output
+$vidCount			 = $VidCountIn
 
 $searchRoots = @("C:\AV Tools")
 
@@ -46,13 +51,18 @@ $mkvpropeditPath = Find-Tool "mkvpropedit.exe"  $searchRoots
 $handBrakePath   = Find-Tool "HandBrakeCLI.exe" $searchRoots
 $mediaInfoPath   = Find-Tool "MediaInfo.exe"    $searchRoots
 
+# keep static analysis quiet by referencing variables
+$null = $vobsubDir, $encodedBaseDir, $garbageBaseDir, $classificationsFile, $metaSourceDir, $metaOutputDir,
+        $ffmpegPath, $ffprobePath, $mkvmergePath, $mkvextractPath, $mkvpropeditPath, $handBrakePath, $mediaInfoPath
+
+Write-Host "DEBUG: vidcount $vidCount"
 # ============================================
 # DISPATCH
 # ============================================
-if      ($SubReview)     { Invoke-SubReviewMode }
-elseif  ($MetadataRemux) { Invoke-MetadataRemux }
-elseif  ($Encode)        { Invoke-EncodeMode }
-elseif  ($AnalyzeOnly)   { Invoke-EncodeMode }
+if      ($SubReview)     { Invoke-SubReviewMode -vobsubDir $vobsubDir -encodedBaseDir $encodedBaseDir -garbageBaseDir $garbageBaseDir -classificationsFile $classificationsFile -mkvmergePath $mkvmergePath -ffprobePath $ffprobePath -ffmpegPath $ffmpegPath -handBrakePath $handBrakePath -mediaInfoPath $mediaInfoPath -DryRun:$DryRun }
+elseif  ($MetadataRemux) { Invoke-MetadataRemux -metaSourceDir $metaSourceDir -metaOutputDir $metaOutputDir -ffmpegPath $ffmpegPath -ffprobePath $ffprobePath -DryRun:$DryRun }
+elseif  ($Encode)        { Invoke-EncodeMode -SrcDir $SrcDir -VidCountIn $VidCountIn -DstDir $DstDir -GbgDir $GbgDir -ffmpegPath $ffmpegPath -ffprobePath $ffprobePath -mkvmergePath $mkvmergePath -mkvextractPath $mkvextractPath -mkvpropeditPath $mkvpropeditPath -handBrakePath $handBrakePath -mediaInfoPath $mediaInfoPath -DryRun:$DryRun }
+elseif  ($AnalyzeOnly)   { Invoke-EncodeMode -SrcDir $SrcDir -VidCountIn $VidCountIn -DstDir $DstDir -GbgDir $GbgDir -ffmpegPath $ffmpegPath -ffprobePath $ffprobePath -mkvmergePath $mkvmergePath -mkvextractPath $mkvextractPath -mkvpropeditPath $mkvpropeditPath -handBrakePath $handBrakePath -mediaInfoPath $mediaInfoPath -DryRun:$DryRun }
 else {
 	Write-Log "==============================================================================================================="
 	Write-Log "Usage instructions: .\Claude-Unified.ps1 [switch (-DryRun)]"

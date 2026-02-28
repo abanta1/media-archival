@@ -377,7 +377,9 @@ function Export-SubtitleTrack {
     param(
         [string]$InputFile,
         [object]$Track,      # unified track object
-        [string]$TempDir
+        [string]$TempDir,
+        [string]$ffmpegPath,
+        [string]$mkvextractPath
     )
 
     $base = Join-Path $TempDir "track_$($Track.TrackNum)"

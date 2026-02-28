@@ -1,5 +1,21 @@
 function Invoke-EncodeMode {
-
+    param(
+        [string]$SrcDir,
+        [int]$VidCountIn,
+        [string]$DstDir,
+        [string]$GbgDir,
+        [string]$ffmpegPath,
+        [string]$ffprobePath,
+        [string]$mkvmergePath,
+        [string]$mkvextractPath,
+        [string]$mkvpropeditPath,
+        [string]$handBrakePath,
+        [string]$mediaInfoPath,
+        [switch]$DryRun
+    )
+    Write-host "DEBUG: vidcount $VidCountIn"
+    Write-Host "DEBUG: SrcDir=$SrcDir"
+    Write-Host "DEBUG: ffmpegPath=$ffmpegPath"
     Test-Dependency @(
         @{ Name="FFmpeg";       Path=$ffmpegPath    }
         @{ Name="mkvmerge";     Path=$mkvmergePath  }
@@ -8,7 +24,12 @@ function Invoke-EncodeMode {
         @{ Name="HandBrakeCLI"; Path=$handBrakePath  }
     )
 
-    $vids = Get-Vid -SrcDirPath $SrcDir
+    write-host "DEBUG: vidcount $VidCountIn"
+    if ($null -eq $VidCountIn -or $VidCountIn -eq 0){
+        $vids = Get-Vid -SrcDirPath $SrcDir
+    } else {
+        $vids = Get-Vid -SrcDirPath $SrcDir -VidCount $VidCountIn
+    }
     if ($vids.Count -eq 0) { return }
 
     $FullEncodingPlan = @()
@@ -17,7 +38,12 @@ function Invoke-EncodeMode {
     foreach ($vid in $vids) {
         Write-Log " Processing ($($vids.IndexOf($vid)+1)/$($vids.Count)): $($vid.Name)" -Color Green
 
-        try { $scan = Get-Metadata -VideoPath $vid.FullName }
+        try { 
+            $scan = Get-Metadata -VideoPath $vid.FullName `
+                        -handBrakePath $handBrakePath -ffprobePath $ffprobePath `
+                        -mkvmergePath $mkvmergePath -mediaInfoPath $mediaInfoPath `
+                        -ffmpegPath $ffmpegPath
+        }
         catch { $e = $_.Exception
             Write-Log "  CRITICAL ERROR scanning $($vid.Name) - skipping" -Color Red
             Write-Host "$e"
@@ -25,7 +51,7 @@ function Invoke-EncodeMode {
         }
 
         $audioInfo = $scan.Audio
-		$adAnalysis = Get-ADAnalysis -AudioTracks $audioInfo.Tracks -FilePath $vid.FullName
+		$adAnalysis = Get-ADAnalysis -AudioTracks $audioInfo.Tracks -FilePath $vid.FullName -ffmpegPath $ffmpegPath
 		$adTrack = $adAnalysis.ADTrackNum
 		$adConfidence = $adAnalysis.Confidence
 
@@ -178,7 +204,9 @@ function Invoke-EncodeMode {
         if ($i -lt $lines.Count-1 -and $lines[$i+1] -match '^\S' -and $lines[$i+1] -notmatch '^-+') { $newLines += "" }
     }
     Write-Host ""
-    Write-Log ($newLines -join "`n") -NoTimeStamp -Color White
+    if ($newLines.Count -gt 0) {
+        Write-Log ($newLines -join "`n") -NoTimeStamp -Color White
+    }
 
     if ($AnalyzeOnly) { Write-Log "`n-AnalyzeOnly: no encodes started." -Color Yellow; return }
 
@@ -229,6 +257,7 @@ function Invoke-EncodeMode {
 
         if ($sub.SubtitleList) {
             $keys = $sub.SubtitleList.Split(',') | ForEach-Object { $_.Trim() }
+            $i = 1
 
             foreach ($k in $keys) {
                 $track = $subtitleTracks | Where-Object { $_.TrackKey -eq $k } | Select-Object -First 1
@@ -248,6 +277,7 @@ function Invoke-EncodeMode {
                     
                     Write-Log "    [$i] Track $k`: $trackName $nameType" -Color Cyan
                     $hbSubOrder += $hbIndex
+                    $i++
                 }
             }
             $hbSubOrder = $hbSubOrder -split " " -join ","
@@ -317,7 +347,19 @@ function Invoke-EncodeMode {
 }
 
 function Invoke-SubReviewMode {
-   
+    param(
+        [string]$vobsubDir,
+        [string]$encodedBaseDir,
+        [string]$garbageBaseDir,
+        [string]$classificationsFile,
+        [string]$mkvmergePath,
+        [string]$ffprobePath,
+        [string]$ffmpegPath,
+        [string]$handBrakePath,
+        [string]$mediaInfoPath,
+        [switch]$DryRun
+    )
+    
     Test-Dependency @(
         @{ Name="mkvmerge"; Path=$mkvmergePath }
         @{ Name="ffprobe";  Path=$ffprobePath  }
@@ -329,7 +371,7 @@ function Invoke-SubReviewMode {
     if ($vobsubFiles.Count -eq 0) { Write-Log "No files found in: $vobsubDir" -Color Yellow; return }
     Write-Log "Found $($vobsubFiles.Count) files to review" -Color Green
 
-    $allClassifications = Get-Classification
+    $allClassifications = Get-Classification -ClassificationsFile $classificationsFile
     $filesToProcess = @()
 
     Write-Log "`nPhase 1: User Classification..." -Color Cyan
@@ -376,10 +418,10 @@ function Invoke-SubReviewMode {
 			$filesToProcess += @{ File=$file; Subtitles=$subtitles; Classification=$classification }
 		}
 
-		if ($userQuit) { Write-Log "User quit - saving progress" -Color Yellow; Save-Classification -Classifications $allClassifications; return }
+		if ($userQuit) { Write-Log "User quit - saving progress" -Color Yellow; Save-Classification -Classifications $allClassifications -ClassificationsFile $classificationsFile; return }
 	}
 
-    Save-Classification -Classifications $allClassifications
+    Save-Classification -Classifications $allClassifications -ClassificationsFile $classificationsFile
 
     Write-Log "`nPhase 2: Processing files..." -Color Cyan
     $processedCount = 0
@@ -418,17 +460,35 @@ function Invoke-SubReviewMode {
         } else { Write-Log "  FAILED" -Color Red }
     }
 
-    Save-Classification -Classifications $allClassifications
+    Save-Classification -Classifications $allClassifications -ClassificationsFile $classificationsFile
     Write-Log "`nPROCESSING COMPLETE! $processedCount/$($filesToProcess.Count) files" -Color Green
 }
 
 function Save-Classification {
+    param(
+        [Parameter(Mandatory=$true)][hashtable]$Classifications,
+        [Parameter(Mandatory=$true)][string]$ClassificationsFile
+    )
+    $Classifications | ConvertTo-Json -Depth 5 | Out-File -FilePath $ClassificationsFile -Encoding UTF8
 }
 
 function Get-Classification {
+    param([string]$ClassificationsFile)
+    if (Test-Path $ClassificationsFile) {
+        return Get-Content $ClassificationsFile -Raw | ConvertFrom-Json
+    } else {
+        return @{ files = @{} }
+    }
 }
 
 function Invoke-MetadataRemux {
+    param(
+        [string]$metaSourceDir,
+        [string]$metaOutputDir,
+        [string]$ffmpegPath,
+        [string]$ffprobePath,
+        [switch]$DryRun
+    )
     
     Test-Dependency @(
         @{Name="FFmpeg";Path=$ffmpegPath}
@@ -493,5 +553,5 @@ function Invoke-MetadataRemux {
     }
 }
 
-# No save-classification, get-classification exported - theyre empty
+# classification helper functions are implemented above
 Export-ModuleMember -Function Invoke-SubReviewMode, Invoke-EncodeMode, Invoke-MetadataRemux
