@@ -121,7 +121,6 @@ function New-SubtitleMuxPlan {
     $allEntries = @()
     $needsManualReview = $false
     $allowedIso = @('eng','spa','fra','ita','rus')
-    $nameMap = @{ 'eng'='English'; 'spa'='Spanish'; 'fra'='French'; 'ita'='Italian'; 'rus'='Russian' }
     
     if ($null -eq $SubTracks){
         Write-Log "WARN: No subs found" -Color Yellow
