@@ -1,7 +1,7 @@
 function Convert-AudioCodecName {
     param([string]$codec)
 
-    if (-not $codec -or $null -eq $codec -or $codec -eq 0 -or $codec -eq "") { return "unknown" }
+    if (-not $codec) { return "unknown" }
     
     $newCodec = switch -Regex ($codec.ToLower()) {
         '(?i)mp3'                   {  "mp3" }
@@ -36,6 +36,8 @@ function Convert-ChannelCount {
 function Convert-IsoCode {
     param([string]$isoText)
 
+    if (-not $isoText) { return "und" }
+
     switch ($isoText.ToLower()) {
         "en"    { "eng"; break }
         "eng"   { "eng"; break }
@@ -61,6 +63,8 @@ function Convert-IsoCode {
 function Convert-IsoToLanguage {
     param([string]$isoCode)
 
+    if (-not $isoCode) { return "Unknown" }
+
     $newLanguage = switch ($isoCode.ToLower()) {
         "eng"   { "English" }
         "fra"   { "French" }
@@ -81,7 +85,7 @@ function Convert-IsoToLanguage {
 function Convert-SubCodecType {
     param([string]$codec)
 
-    if (-not $codec -or $null -eq $codec -or $codec -eq 0 -or $codec -eq "") { return "unknown" }
+    if (-not $codec) { return "unknown" }
     
     $newCodec = switch -Regex ($codec.ToLower()) {
         '(?i)vobsub'                {  "bitmap"; break }
@@ -97,7 +101,7 @@ function Convert-SubCodecType {
         '(?i)utf'                   {  "text"; break }
         default                     {  "unknown" }
     }
-
+    
     return $newCodec
 }
 

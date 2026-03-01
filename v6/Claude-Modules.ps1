@@ -38,7 +38,6 @@ $garbageBaseDir      = $GbgDir         # SubReview: garbage root
 $classificationsFile = ".\vobsub_classifications.json"
 $metaSourceDir       = $SrcDir         # MetadataRemux: input
 $metaOutputDir       = $DstDir         # MetadataRemux: output
-$vidCount			 = $VidCountIn
 
 $searchRoots = @("C:\AV Tools")
 
