@@ -85,4 +85,83 @@ function Read-VobSubIdx (){
     return $info
 }
 
-Export-ModuleMember -Function Write-Log, Find-Tool, Test-Dependency, Read-Srt, Read-VobSubIdx
+function Get-AudioLRA {
+    param(
+        [string]$FilePath,
+        [int]$StreamIndex,
+        [string]$ffmpegPath
+    )
+
+    if (-not ($ffmpegPath -and (Test-Path $ffmpegPath -PathType Leaf))) {
+        Write-Log "  WARNING: ffmpeg path invalid; LRA unavailable" -Color Yellow
+        return 0
+    }
+
+    $cmd = "`"$ffmpegPath`" -t 180 -i `"$FilePath`" -map 0:a:$StreamIndex -af ebur128 -f null - 2>&1"
+    $out = cmd /c $cmd
+    $line = ($out | Select-String "LRA:" | Select-Object -Last 1).Line
+
+    # Extract the actual LRA number
+    $m = [regex]::Match($line, 'LRA:\s*(\d+(\.\d+)?)(?=\s*LU)')
+    
+    if ($m.Success) {
+        return [double]$m.Groups[1].Value
+    }
+
+    return 0
+}
+
+function Get-CenterRMS {
+    param(
+        [string]$FilePath,
+        [int]$TrackKey,
+        [string]$ffmpegPath
+    )
+
+    if (-not ($ffmpegPath -and (Test-Path $ffmpegPath -PathType Leaf))) {
+        Write-Log "  WARNING: ffmpeg path invalid; RMS unavailable" -Color Yellow
+        return 0
+    }
+
+    $cmd = "`"$ffmpegPath`" -t 180 -i `"$FilePath`" -map 0:a:$TrackKey -af ebur128 -f null - 2>&1"
+    $out = cmd /c $cmd
+
+    $m = [regex]::Match($out, 'M:\s*(?<rms>-?\d+(\.\d+)?)')
+    
+    if ($m.Success) {
+        return [double]$m.Groups['rms'].Value
+    }
+
+    return 0
+}
+
+function Get-SpectralFlatness {
+    param(
+        [string]$FilePath,
+        [int]$StreamIndex,
+        [string]$ffmpegPath
+    )
+
+    if (-not ($ffmpegPath -and (Test-Path $ffmpegPath -PathType Leaf))) {
+        Write-Log "  WARNING: ffmpeg path invalid; spectral flatness unavailable" -Color Yellow
+        return 0.0
+    }
+
+    $cmd = "`"$ffmpegPath`" -t 60 -i `"$FilePath`" -map 0:a:$StreamIndex -af `"astats=metadata=1:reset=1`" -f null - 2>&1"
+    $out = cmd /c $cmd
+
+    # Collect all flatness values
+    $vals = @()
+    foreach ($line in ($out -split "`n")) {
+        if ($line -match "Spectral_flatness:\s*(\d+\.\d+)") {
+            $vals += [double]$Matches[1]
+        }
+    }
+
+    if ($vals.Count -eq 0) { return 0.0 }
+
+    # Return median (robust against outliers)
+    return ($vals | Sort-Object)[[int]($vals.Count/2)]
+}
+
+Export-ModuleMember -Function Write-Log, Find-Tool, Test-Dependency, Read-Srt, Read-VobSubIdx, Get-AudioLRA, Get-CenterRMS, Get-SpectralFlatness
