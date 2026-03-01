@@ -101,7 +101,7 @@ function Convert-SubCodecType {
         '(?i)utf'                   {  "text"; break }
         default                     {  "unknown" }
     }
-
+    
     return $newCodec
 }
 
