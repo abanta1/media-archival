@@ -594,5 +594,4 @@ function Get-UserClassification {
     return $classifications
 }
 
-# Select-Preset moves to Media.Planning.psm1 in future
 Export-ModuleMember -Function Get-ADAnalysis, New-AudioStrategy, New-SubtitleMuxPlan, Get-ProposedTrackName, Get-OrderedTrack, Select-Preset, Get-UserClassification
