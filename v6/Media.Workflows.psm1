@@ -468,25 +468,6 @@ function Get-OrderedTrack {
     return @($engStd|Sort-Object TrackId) + @($engForced|Sort-Object TrackId) + @($engSDH|Sort-Object TrackId) + @($foreign|Sort-Object Language,TrackId) + @($engCom|Sort-Object TrackId)
 }
 
-function Select-Preset {
-    param([int]$height, [bool]$HasAtmos, [bool]$HasLossless, [bool]$IsDVD, [bool]$HasBitmapSub)
-    if ($HasAtmos -or $HasLossless -or $HasBitmapSub) {
-        $ext="mkv"; $ct="mkv"
-        if ($HasBitmapSub) { Write-Log "  Bitmap subtitles detected - using MKV" -Color Green }
-        else                  { Write-Log "  ATMOS/Lossless audio detected - using MKV" -Color Green }
-    } else { $ext="m4v"; $ct="m4v" }
-    if ($IsDVD -or $height -le 480) {
-        Write-Log "  SD/DVD source - using DVD preset" -Color Yellow
-        return [PSCustomObject]@{ Preset="Mine-265-10b-$ct-dvd"; Extension=".$ext" }
-    } elseif ($height -le 1080) {
-        Write-Log "  1080p source - using BD preset" -Color Green
-        return [PSCustomObject]@{ Preset="Mine-265-10b-$ct-bd";  Extension=".$ext" }
-    } else {
-        Write-Log "  4K source - using 4K preset" -Color Green
-        return [PSCustomObject]@{ Preset="Mine-265-10b-$ct-4k";  Extension=".$ext" }
-    }
-}
-
 function Get-UserClassification {
     param([string]$FileName, [array]$Subtitles, [object]$ExistingClassification)
 
@@ -594,5 +575,4 @@ function Get-UserClassification {
     return $classifications
 }
 
-# Select-Preset moves to Media.Planning.psm1 in future
 Export-ModuleMember -Function Get-ADAnalysis, New-AudioStrategy, New-SubtitleMuxPlan, Get-ProposedTrackName, Get-OrderedTrack, Select-Preset, Get-UserClassification
