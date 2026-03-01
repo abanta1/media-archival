@@ -8,7 +8,7 @@ function Get-ADAnalysis {
     Write-Log " Detecting AD Track (unified)..." -Color Yellow
 
     # Candidates: English, non-commentary
-    $eng = $AudioTracks | Where-Object { $_.IsEnglish.Value -and -not $_.IsCommentary.Value }
+    $eng = $AudioTracks | Where-Object { $_.IsEnglish -and -not $_.IsCommentary }
     
     if ($eng.Count -ne 2) {
         Write-Log "  INFO: Need exactly 2 English non-commentary tracks, found $($eng.Count) - skipping AD detection" -Color White -NoHost
@@ -114,7 +114,7 @@ function New-AudioStrategy {
     foreach ($track in $english) {
         $inc=$false; $enc="copy"; $mix="none"; $bit=0; $name=""
 
-		if ($track.IsAD.Value) {
+		if ($track.IsAD) {
 			$s.Tracks     += $track.TrackKey
 			$s.Encoders   += "av_aac"
 			$s.Mixdowns   += "mono"
@@ -129,7 +129,7 @@ function New-AudioStrategy {
 		# Track 1: Best Lossless 5.1+ (if exist)
         if ($track.Quality -ge 85 -and $track.Channels -ge 5.1 -and -not $addedLossless) {
             $inc=$true; $addedLossless=$true; $losslessTrack=$track
-            if ($track.Format -match 'LPCM|pcm_s16le|pcm_s24le') {
+            if ($track.Codec -match 'LPCM|pcm_s16le|pcm_s24le') {
 				$enc="ac3" #Universally compatible
 				$mix="5point1" #7.1 not supported ac3
 				$bit=640 #max bitrate for ac3
@@ -144,7 +144,7 @@ function New-AudioStrategy {
 			$inc=$true; $addedAC3=$true
 			if ($losslessTrack){
 				# Encode from lossless track
-				$s.Tracks+=$losslessTrack.TrackNum
+				$s.Tracks+=$losslessTrack.TrackKey
 				$s.Encoders+="ac3"
 				$s.Mixdowns+="5point1"
 				$s.Bitrates+=640
@@ -487,79 +487,6 @@ function Select-Preset {
     }
 }
 
-function Export-SubtitleTrack {
-    param(
-        [string]$InputFile,
-        [object]$Track,      # unified track object
-        [string]$TempDir,
-        [string]$ffmpegPath,
-        [string]$mkvextractPath
-    )
-
-    $base = Join-Path $TempDir "track_$($Track.TrackNum)"
-    $mkvID = $Track.MKVTrackID
-    $si    = $Track.MKVOrder   # correct stream index for ffmpeg
-
-    #
-    # --- BITMAP: VobSub / DVD ---
-    #
-    if ($Track.IsBitmap -and ($Track.CodecID -match "vobsub|dvd|S_VOBSUB")) {
-
-        $cmd = "`"$mkvextractPath`" tracks `"$InputFile`" $($mkvID):`"$base`""
-        cmd /c $cmd
-
-        if ($LASTEXITCODE -ne 0) {
-            Write-Log "  WARNING: VobSub extraction failed, trying fallback..." -Color Yellow
-
-            $tmp = "$base.temp.mkv"
-            cmd /c "`"$ffmpegPath`" -y -i `"$InputFile`" -map 0:s:$si -c copy `"$tmp`" 2>&1" | Out-Null
-
-            if (Test-Path $tmp) {
-                cmd /c "`"$ffmpegPath`" -y -i `"$tmp`" -map 0:s:0 -c:s dvdsub `"$base`" 2>&1" | Out-Null
-                Remove-Item $tmp -ErrorAction SilentlyContinue
-            }
-        }
-
-        return $base
-    }
-
-    #
-    # --- TEXT: SRT / UTF-8 / SUBRIP ---
-    #
-    if ($Track.IsText -and ($Track.CodecID -match "srt|utf|text|subrip|S_TEXT")) {
-        cmd /c "`"$ffmpegPath`" -y -i `"$InputFile`" -map 0:s:$si -c:s srt `"$base.srt`" 2>&1"
-        if ($LASTEXITCODE -ne 0) {
-            Write-Log "  WARNING: SRT extraction failed ($LASTEXITCODE)" -Color Red
-        }
-        return "$base.srt"
-    }
-
-    #
-    # --- PGS / SUP ---
-    #
-    if ($Track.CodecID -match "pgs|hdmv|sup") {
-        cmd /c "`"$ffmpegPath`" -y -i `"$InputFile`" -map 0:s:$si -c:s copy `"$base.sup`" 2>&1" | Out-Null
-        return "$base.sup"
-    }
-
-    #
-    # --- ASS / SSA ---
-    #
-    if ($Track.CodecID -match "ass|ssa") {
-        cmd /c "`"$ffmpegPath`" -y -i `"$InputFile`" -map 0:s:$si -c:s copy `"$base.ass`" 2>&1" | Out-Null
-        return "$base.ass"
-    }
-
-    #
-    # --- FALLBACK ---
-    #
-    cmd /c "`"$ffmpegPath`" -y -i `"$InputFile`" -map 0:s:$si -c:s srt `"$base.srt`" 2>&1" | Out-Null
-    return "$base.srt"
-}
-
-function New-RemuxWithSubtitles {
-}
-
 function Get-UserClassification {
     param([string]$FileName, [array]$Subtitles, [object]$ExistingClassification)
 
@@ -667,4 +594,5 @@ function Get-UserClassification {
     return $classifications
 }
 
-Export-ModuleMember -Function Get-ADAnalysis, New-AudioStrategy, New-SubtitleMuxPlan, Get-SubtitleClassification, Get-ProposedTrackName, Get-SuggestedType, Get-OrderedTrack, Select-Preset, Export-SubtitleTrack, New-RemuxWithSubtitles, Get-UserClassification, Convert-IsoCode, Convert-IsoToLanguage
+# Select-Preset moves to Media.Planning.psm1 in future
+Export-ModuleMember -Function Get-ADAnalysis, New-AudioStrategy, New-SubtitleMuxPlan, Get-ProposedTrackName, Get-OrderedTrack, Select-Preset, Get-UserClassification
