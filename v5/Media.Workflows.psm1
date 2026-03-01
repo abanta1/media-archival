@@ -116,7 +116,7 @@ function New-SubtitleMuxPlan {
         [array]$SubTracks,
         [string]$PrimaryAudioIso
     )
-
+Write-Host "DEBUG: A: subtracks count $($SubTracks.Count)"
     # --- 1. INITIALIZATION & METADATA ---
     $allEntries = @()
     $needsManualReview = $false
@@ -132,7 +132,7 @@ function New-SubtitleMuxPlan {
             $_
         }
     }
-    
+Write-Host "DEBUG: A: subtracks count $($SubTracks.Count)"
     $SubTracks = $SubTracks | Where-Object { 
         if ($allowedIso -contains $_.IsoCode) { 
             $true 
@@ -141,13 +141,15 @@ function New-SubtitleMuxPlan {
             $false
         }
     }
-    
+Write-Host "DEBUG: A: subtracks count $($SubTracks.Count)"
     $i = $SubTracks[0].TrackKey - 1
     $classified = foreach ($t in $SubTracks) {
         $cl = Get-SubtitleClassification -Subtitle $t -AllSubtitles $SubTracks
         if ($cl.Confidence -eq 'Low') { $needsManualReview = $true }
-
-        Write-Log "    [$i] Track $($t.TrackKey): $($t.Language) $($cl.Type)" -Color Cyan
+        if ($t.IsBitmap) {$tBitFlag = " Bitmap"} elseif ($t.IsText) {$tBitFlag = " Text"}
+        if ($t.Forced) {$tForcedFlag = ", Forced"} else {$tForcedFlag = ""}
+        if ($t.Default -eq $true) {$tDefaultFlag = ", Default"} else {$tDefaultFlag = ""}
+        Write-Log "    [$i] Track $($t.TrackKey): $($t.Language) $($cl.Type) - $tBitFlag$tDefaultFlag$tForcedFlag" -Color Cyan
         
         [PSCustomObject]@{
             Track        = $t
@@ -160,7 +162,7 @@ function New-SubtitleMuxPlan {
         }
         $i++
     }
-
+Write-Host "DEBUG: A: classified count $($classified.Count)"
     $ordered = @()
 
     # 1. ENG standard (first)
@@ -188,7 +190,7 @@ function New-SubtitleMuxPlan {
     $ordered += $classified |
         Where-Object { $_.IsoCode -eq 'eng' -and $_.Type -eq 'commentary' } |
         Sort-Object { $_.Track.TrackKey }
-
+Write-Host "DEBUG: A: ordered count $($ordered.Count)"
     $allEntries = foreach ($entry in $ordered) {
         [PSCustomObject]@{
             Action       = 'Keep'
@@ -201,8 +203,9 @@ function New-SubtitleMuxPlan {
             ElementCount = $entry.ElementCount
         }
     }
-
+Write-Host "DEBUG: A: allentries count $($allEntries.Count)"
     $deduped = @()
+    $existingMatch = @()
     foreach ($entry in $allEntries) {
         $existingMatch = $deduped | Where-Object { 
             $_.Language -eq $entry.Language -and 
@@ -214,19 +217,20 @@ function New-SubtitleMuxPlan {
         if ($null -eq $existingMatch) {
             $deduped += $entry
         } elseif ($existingMatch.SourceType -eq 'Bitmap' -and $entry.SourceType -eq 'Text') {
-            $deduped = $deduped | Where-Object { $_.TrackKey -ne $existingMatch.TrackKey }
+            $deduped = @($deduped | Where-Object { $_.TrackKey -ne $existingMatch.TrackKey })
             $deduped += $entry
         }
     }
-
+Write-Host "DEBUG: A: deduped count $($deduped.Count)"
     $ordered = @()
     $ordered += $deduped | Where-Object { $_.Language -eq 'eng' -and $_.Role -eq 'standard' }
     $ordered += $deduped | Where-Object { $_.Language -eq 'eng' -and $_.Role -eq 'sdh' }
     $ordered += $deduped | Where-Object { $_.Language -eq 'eng' -and $_.Role -eq 'forced' }
     $ordered += $deduped | Where-Object { $_.Language -ne 'eng' } | Sort-Object Language
     $ordered += $deduped | Where-Object { $_.Language -eq 'eng' -and $_.Role -eq 'commentary' }
-
-    $plan = foreach ($entry in $ordered) {
+Write-Host "DEBUG: A: ordered count $($ordered.Count)"
+    $plan = @()
+    $plan = @(foreach ($entry in $ordered) {
         # Only Burn if it's the first track in the final list and marked for burn
         $finalAction = if ($entry.Action -eq 'Burn' -and $ordered[0].TrackKey -eq $entry.TrackKey) { 'Burn' } else { 'Keep' }
 		if (($entry.Default) -and (-not $entry.Forced)){
@@ -242,8 +246,8 @@ function New-SubtitleMuxPlan {
             Forced     = $entry.Forced
             Default    = $entry.Default
         }
-    }
-
+    })
+Write-Host "DEBUG: A: plan count $($plan.Count)"
     return @{
         Plan              = $plan
         NeedsManualReview = $needsManualReview
