@@ -1,3 +1,105 @@
+function Get-ADAnalysis {
+    param(
+        [array]$AudioTracks,
+        [string]$FilePath,
+        [string]$ffmpegPath
+    )
+
+    Write-Log " Detecting AD Track (unified)..." -Color Yellow
+
+    # Candidates: English, non-commentary
+    $eng = $AudioTracks | Where-Object { $_.IsEnglish -and -not $_.IsCommentary }
+    
+    if ($eng.Count -ne 2) {
+        Write-Log "  INFO: Need exactly 2 English non-commentary tracks, found $($eng.Count) - skipping AD detection" -Color White -NoHost
+        return $null
+    }
+
+    # --- FEATURE EXTRACTION --------------------------------------------------
+
+    $f1_metaAD = if ($eng[0].IsAD) { 1 } else { 0 }
+    $f2_metaAD = if ($eng[1].IsAD) { 1 } else { 0 }
+    
+    $f1_metaCom = if ($eng[0].IsCommentary) { 1 } else { 0 }
+    $f2_metaCom = if ($eng[1].IsCommentary) { 1 } else { 0 }
+
+    # Center RMS (5.1+)
+    Write-Log "  Center channel RMS..." -Color Yellow
+    if ($eng[0].Channels -ge 5.1 -and $eng[1].Channels -ge 5.1) {
+        $r1 = Get-CenterRMS -FilePath $FilePath -TrackKey ($eng[0].TrackKey - 1) -ffmpegPath $ffmpegPath
+        $r2 = Get-CenterRMS -FilePath $FilePath -TrackKey ($eng[1].TrackKey - 1) -ffmpegPath $ffmpegPath
+        $maxR = [math]::Max($r1, $r2)
+        $f1_rms = ($maxR - $r1) / 10
+        $f2_rms = ($maxR - $r2) / 10
+    } else {
+        $f1_rms = 0; $f2_rms = 0
+    }
+
+    # LRA
+    Write-Log "  Loudness Range (LRA)..." -Color Yellow
+    $l1 = Get-AudioLRA -FilePath $FilePath -StreamIndex ($eng[0].TrackKey - 1) -ffmpegPath $ffmpegPath
+    $l2 = Get-AudioLRA -FilePath $FilePath -StreamIndex ($eng[1].TrackKey - 1) -ffmpegPath $ffmpegPath
+    $maxL = [math]::Max($l1, $l2)
+    $f1_lra = ($maxL - $l1)
+    $f2_lra = ($maxL - $l2)
+
+    # Spectral flatness (stereo fallback)
+    if ($eng[0].Channels -le 2.0 -and $eng[1].Channels -le 2.0) {
+        $sf1 = Get-SpectralFlatness -FilePath $FilePath -StreamIndex ($eng[0].TrackKey - 1) -ffmpegPath $ffmpegPath
+        $sf2 = Get-SpectralFlatness -FilePath $FilePath -StreamIndex ($eng[1].TrackKey - 1) -ffmpegPath $ffmpegPath
+        $maxSF = [math]::Max($sf1, $sf2)
+        $f1_sf = ($maxSF - $sf1) * 10
+        $f2_sf = ($maxSF - $sf2) * 10
+    } else {
+        $f1_sf = 0; $f2_sf = 0
+    }
+
+    # Base from Detect-ADTrack
+    $score1 = 10*$f1_metaAD - 4*$f1_metaCom + 7*$f1_rms + 5*$f1_lra + 4*$f1_sf
+    $score2 = 10*$f2_metaAD - 4*$f2_metaCom + 7*$f2_rms + 5*$f2_lra + 4*$f2_sf
+
+    $lraDelta = [math]::Abs($l1 - $l2)
+    if ($lraDelta -gt 1.0) {
+        if ($l1 -lt $l2) { $score1 += 7; } 
+        else { $score2 += 7; } 
+    }
+
+    $delta = [math]::Abs($score1 - $score2)
+    
+    if ($delta -lt 3) {
+        return $null
+    }
+
+    $winnerTrack = if ($score1 -gt $score2) { $eng[0] } else { $eng[1] }
+    $confidence = if ($delta -ge 12) { 'High' } elseif ($delta -ge 6) { 'Medium' } else { 'Low' }
+
+    [PSCustomObject]@{
+        ADTrackNum = $winnerTrack.TrackKey
+        Confidence = $confidence
+        ScoreDelta = $delta
+        Tracks     = @(
+            [PSCustomObject]@{
+                TrackKey = $eng[0].TrackKey
+                Score   = $score1
+                LRA     = $l1
+                CenterRMS = $f1_rms
+                MetaAD    = $f1_metaAD
+                MetaCom   = $f1_metaCom
+                Spectral  = $f1_sf
+            },
+            [PSCustomObject]@{
+                TrackKey = $eng[1].TrackKey
+                Score   = $score2
+                LRA     = $l2
+                CenterRMS = $f2_rms
+                MetaAD    = $f2_metaAD
+                MetaCom   = $f2_metaCom
+                Spectral  = $f2_sf
+            }
+        )
+    }
+}
+
 function New-AudioStrategy {
     param([array]$AudioTracks)
 
@@ -12,7 +114,7 @@ function New-AudioStrategy {
     foreach ($track in $english) {
         $inc=$false; $enc="copy"; $mix="none"; $bit=0; $name=""
 
-		if ($track.IsAD.Value) {
+		if ($track.IsAD) {
 			$s.Tracks     += $track.TrackKey
 			$s.Encoders   += "av_aac"
 			$s.Mixdowns   += "mono"
@@ -27,7 +129,7 @@ function New-AudioStrategy {
 		# Track 1: Best Lossless 5.1+ (if exist)
         if ($track.Quality -ge 85 -and $track.Channels -ge 5.1 -and -not $addedLossless) {
             $inc=$true; $addedLossless=$true; $losslessTrack=$track
-            if ($track.Format -match 'LPCM|pcm_s16le|pcm_s24le') {
+            if ($track.Codec -match 'LPCM|pcm_s16le|pcm_s24le') {
 				$enc="ac3" #Universally compatible
 				$mix="5point1" #7.1 not supported ac3
 				$bit=640 #max bitrate for ac3
@@ -42,7 +144,7 @@ function New-AudioStrategy {
 			$inc=$true; $addedAC3=$true
 			if ($losslessTrack){
 				# Encode from lossless track
-				$s.Tracks+=$losslessTrack.TrackNum
+				$s.Tracks+=$losslessTrack.TrackKey
 				$s.Encoders+="ac3"
 				$s.Mixdowns+="5point1"
 				$s.Bitrates+=640
@@ -366,98 +468,6 @@ function Get-OrderedTrack {
     return @($engStd|Sort-Object TrackId) + @($engForced|Sort-Object TrackId) + @($engSDH|Sort-Object TrackId) + @($foreign|Sort-Object Language,TrackId) + @($engCom|Sort-Object TrackId)
 }
 
-function Select-Preset {
-    param([int]$height, [bool]$HasAtmos, [bool]$HasLossless, [bool]$IsDVD, [bool]$HasBitmapSub)
-    if ($HasAtmos -or $HasLossless -or $HasBitmapSub) {
-        $ext="mkv"; $ct="mkv"
-        if ($HasBitmapSub) { Write-Log "  Bitmap subtitles detected - using MKV" -Color Green }
-        else                  { Write-Log "  ATMOS/Lossless audio detected - using MKV" -Color Green }
-    } else { $ext="m4v"; $ct="m4v" }
-    if ($IsDVD -or $height -le 480) {
-        Write-Log "  SD/DVD source - using DVD preset" -Color Yellow
-        return [PSCustomObject]@{ Preset="Mine-265-10b-$ct-dvd"; Extension=".$ext" }
-    } elseif ($height -le 1080) {
-        Write-Log "  1080p source - using BD preset" -Color Green
-        return [PSCustomObject]@{ Preset="Mine-265-10b-$ct-bd";  Extension=".$ext" }
-    } else {
-        Write-Log "  4K source - using 4K preset" -Color Green
-        return [PSCustomObject]@{ Preset="Mine-265-10b-$ct-4k";  Extension=".$ext" }
-    }
-}
-
-function Export-SubtitleTrack {
-    param(
-        [string]$InputFile,
-        [object]$Track,      # unified track object
-        [string]$TempDir,
-        [string]$ffmpegPath,
-        [string]$mkvextractPath
-    )
-
-    $base = Join-Path $TempDir "track_$($Track.TrackNum)"
-    $mkvID = $Track.MKVTrackID
-    $si    = $Track.MKVOrder   # correct stream index for ffmpeg
-
-    #
-    # --- BITMAP: VobSub / DVD ---
-    #
-    if ($Track.IsBitmap -and ($Track.CodecID -match "vobsub|dvd|S_VOBSUB")) {
-
-        $cmd = "`"$mkvextractPath`" tracks `"$InputFile`" $($mkvID):`"$base`""
-        cmd /c $cmd
-
-        if ($LASTEXITCODE -ne 0) {
-            Write-Log "  WARNING: VobSub extraction failed, trying fallback..." -Color Yellow
-
-            $tmp = "$base.temp.mkv"
-            cmd /c "`"$ffmpegPath`" -y -i `"$InputFile`" -map 0:s:$si -c copy `"$tmp`" 2>&1" | Out-Null
-
-            if (Test-Path $tmp) {
-                cmd /c "`"$ffmpegPath`" -y -i `"$tmp`" -map 0:s:0 -c:s dvdsub `"$base`" 2>&1" | Out-Null
-                Remove-Item $tmp -ErrorAction SilentlyContinue
-            }
-        }
-
-        return $base
-    }
-
-    #
-    # --- TEXT: SRT / UTF-8 / SUBRIP ---
-    #
-    if ($Track.IsText -and ($Track.CodecID -match "srt|utf|text|subrip|S_TEXT")) {
-        cmd /c "`"$ffmpegPath`" -y -i `"$InputFile`" -map 0:s:$si -c:s srt `"$base.srt`" 2>&1"
-        if ($LASTEXITCODE -ne 0) {
-            Write-Log "  WARNING: SRT extraction failed ($LASTEXITCODE)" -Color Red
-        }
-        return "$base.srt"
-    }
-
-    #
-    # --- PGS / SUP ---
-    #
-    if ($Track.CodecID -match "pgs|hdmv|sup") {
-        cmd /c "`"$ffmpegPath`" -y -i `"$InputFile`" -map 0:s:$si -c:s copy `"$base.sup`" 2>&1" | Out-Null
-        return "$base.sup"
-    }
-
-    #
-    # --- ASS / SSA ---
-    #
-    if ($Track.CodecID -match "ass|ssa") {
-        cmd /c "`"$ffmpegPath`" -y -i `"$InputFile`" -map 0:s:$si -c:s copy `"$base.ass`" 2>&1" | Out-Null
-        return "$base.ass"
-    }
-
-    #
-    # --- FALLBACK ---
-    #
-    cmd /c "`"$ffmpegPath`" -y -i `"$InputFile`" -map 0:s:$si -c:s srt `"$base.srt`" 2>&1" | Out-Null
-    return "$base.srt"
-}
-
-function New-RemuxWithSubtitles {
-}
-
 function Get-UserClassification {
     param([string]$FileName, [array]$Subtitles, [object]$ExistingClassification)
 
@@ -565,4 +575,4 @@ function Get-UserClassification {
     return $classifications
 }
 
-Export-ModuleMember -Function New-AudioStrategy, New-SubtitleMuxPlan, Get-SubtitleClassification, Get-ProposedTrackName, Get-SuggestedType, Get-OrderedTrack, Select-Preset, Export-SubtitleTrack, New-RemuxWithSubtitles, Get-UserClassification, Convert-IsoCode, Convert-IsoToLanguage
+Export-ModuleMember -Function Get-ADAnalysis, New-AudioStrategy, New-SubtitleMuxPlan, Get-ProposedTrackName, Get-OrderedTrack, Select-Preset, Get-UserClassification
