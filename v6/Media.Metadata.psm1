@@ -30,7 +30,6 @@ function Get-Metadata {
     }
 }
 
-<<<<<<< HEAD
 function Get-RawMetadata {
     param(
         [string]$VideoPath,
@@ -290,8 +289,6 @@ function Get-RawMetadata {
     }
 }
 
-=======
->>>>>>> aef929562c8946ad50f17bb1564f411315fb2bc7
 function Resolve-Field {
     param([string]$FieldName, [hashtable]$Values, [hashtable]$Weights)
 
@@ -655,7 +652,6 @@ function Merge-AudioMetadata {
 function Merge-VideoMetadata {
 param([object]$RawMetaData, [hashtable]$Weights)
 
-<<<<<<< HEAD
     $hbVideoTracks = $RawMetaData.HbVideo
     $ffVideoTracks = $RawMetaData.FfVideo
     $mkvVideoTracks = $RawMetaData.MkvJVideo
@@ -686,26 +682,6 @@ param([object]$RawMetaData, [hashtable]$Weights)
     $unifiedVideo = $vidTracks
 
     return $unifiedVideo
-=======
-    $height = Resolve-Field "Video Height" @{
-        HandBrake = $RawMetaData.HbVideo.Height
-        MediaInfo = $RawMetaData.MiVideo.Height
-        MKVMerge = $RawMetaData.MkvJVideoHeight
-        FFProbe = $RawMetaDta.FfVideo.Height
-    } $weights
-
-        $width = Resolve-Field "Video Width" @{
-        HandBrake = $RawMetaData.HbVideo.Width
-        MediaInfo = $RawMetaDta.MiVideo.Width
-        MKVMerge = $RawMetaData.MkvJVideo.Width
-        FFProbe = $RawMetaData.FfVideo.Width
-    } $weights
-   
-    return $vidTracks += [PSCustomObject]@{
-        Width = $width
-        Height = $height
-    }
->>>>>>> aef929562c8946ad50f17bb1564f411315fb2bc7
 }
 
 function Merge-SubtitleMetadata {
@@ -716,10 +692,6 @@ function Merge-SubtitleMetadata {
     $mkvJSubTracks = $RawMetaData.MkvJSubs
     $mkvISubTracks = $RawMetaData.MkvISubs
     $miSubTracks = $RawMetaData.MiSubs
-<<<<<<< HEAD
-=======
-    $ffPacketInfo = $RawMetaData.FfPackets
->>>>>>> aef929562c8946ad50f17bb1564f411315fb2bc7
     
     Write-Log "  Processing subtitle metadata..." -Color Green
 
@@ -1032,7 +1004,6 @@ function Merge-SubtitleMetadata {
     return $unifiedSubs
 }
 
-<<<<<<< HEAD
 function Get-SubtitleHash (){
     param([string]$basePath)
 
@@ -1236,17 +1207,11 @@ function Get-ADAnalysis {
     }
 }
 
-=======
->>>>>>> aef929562c8946ad50f17bb1564f411315fb2bc7
 function Get-QualityScore {
     param([string]$codec)
     if (-not $codec -or $null -eq $codec -or $codec -eq 0 -or $codec -eq "") { return 0 }
     
-<<<<<<< HEAD
     $quality = switch -Regex ($format) {
-=======
-    $quality = switch -Regex ($codec) {
->>>>>>> aef929562c8946ad50f17bb1564f411315fb2bc7
              '(?i)TrueHD|FLAC|LPCM|pcm_s16le|pcm_s24le'      { 100 }
              '(?i)DTS-HD MA|DTS-MA|Master Audio'              { 95  }
              '(?i)DTS-HD(?!\s*MA)'                           { 65  }
@@ -1261,7 +1226,6 @@ function Get-QualityScore {
     return $quality
 }
 
-<<<<<<< HEAD
 function Get-ExtractedSubtitle {
     param([string]$basePath, [int]$trackNum, [bool]$MetadataForced)
     $r = [PSCustomObject]@{ TrackNum=$trackNum; Language=''; IsForced=$MetadataForced; IsText=$false; IsSDH=$false; IsCommentary=$false; IsoCode=''; IsVobSub=$false; Hash='' }
@@ -1304,7 +1268,3 @@ function Get-Vid {
 
 # Other functions are isolated to this module, not exporting
 Export-ModuleMember -Function Get-Metadata, Get-Vid, Get-ADAnalysis
-=======
-# Other functions are isolated to this module, not exporting
-Export-ModuleMember -Function Get-Metadata, Get-QualityScore
->>>>>>> aef929562c8946ad50f17bb1564f411315fb2bc7

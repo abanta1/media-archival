@@ -11,7 +11,8 @@ function Invoke-EncodeMode {
         [string]$mkvpropeditPath,
         [string]$handBrakePath,
         [string]$mediaInfoPath,
-        [switch]$DryRun
+        [switch]$DryRun,
+        [switch]$AnalyzeOnly
     )
     
     Test-Dependency @(
@@ -151,6 +152,11 @@ function Invoke-EncodeMode {
             SubtitleStrategy=$subPlanNormalized
             HasBitmap=($effectiveBitmap.Count -gt 0)
             DoProcess=$doProcess
+            Scan=$scan
+            AudioStrategy=$audioStrategy
+            SubPlan=$subPlan
+            PresetInfo=$presetInfo
+            IsDVD=$isDVD
         }
     }
 
@@ -254,7 +260,7 @@ function Invoke-EncodeMode {
             $i = 1
 
             foreach ($k in $keys) {
-                $track = $subtitleTracks | Where-Object { $_.TrackKey -eq $k } | Select-Object -First 1
+                $track = $vid.SubtitleTracks | Where-Object { $_.TrackKey -eq $k } | Select-Object -First 1
                 $classification = $sub.Classifications | Where-Object { $_.TrackKey -eq $k } | Select-Object -First 1
 
                 if ($track) {
@@ -282,51 +288,15 @@ function Invoke-EncodeMode {
         Write-Log "  Input:  $($vid.VideoObject.FullName)" -Color Green
         Write-Log "  Preset: $($vid.PresetName)"           -Color Green
         Write-Log "  Output: $outputFile"                  -Color Green
-        Write-Log "  Starting encode..."                    -Color Yellow
+        $encodingPlan = New-EncodingPlan -VideoPath $vid.VideoObject.FullName `
+            -DisplayName $vid.DisplayName -IsDVD $vid.IsDVD `
+            -Metadata $vid.Scan -AudioStrategy $vid.AudioStrategy `
+            -SubtitlePlan $vid.SubPlan -Preset $vid.PresetInfo
 
-        $hbArgs = @(
-            "--title",           $(if($vid.VideoObject.Name -eq "VIDEO_TS"){"0"}else{"1"}),
-            "--preset-import-gui",
-            "-Z",                $vid.PresetName,
-            "-i",                "$($vid.VideoObject.FullName)",
-            "--main-feature",
-            "--audio",           ($vid.AudioArgs.Tracks   -join ","),
-            "--aencoder",        ($vid.AudioArgs.Encoders  -join ","),
-            "--mixdown",         ($vid.AudioArgs.Mixdowns  -join ","),
-            "--ab",              ($vid.AudioArgs.Bitrates  -join ","),
-            "--aname",           (($vid.AudioArgs.Names | ForEach-Object { "`"$_`"" }) -join ","),
-            "-o",                "$outputFile"
-        )
-        
-        if ($sub.SubtitleList) {
-            $hbArgs += "--subtitle=$hbSubOrder" #$($sub.SubtitleList)"
-            $i=0; $subNames = foreach ($name in $sub.Names) {
-                $nt = if ($i -lt $sub.Classifications.Count) { $sub.Classifications[$i].NameType } else { "" }
-                "`"$name $nt`""; $i++
-            }
-            $hbArgs += "--subname=$($subNames -join ',')"
-            if ($vid.IsTextSub.IsText -or $vid.DoProcess) {
-                if ($sub.ForcedTrack) { $hbArgs += "--subtitle-forced=$($sub.ForcedTrack.TrackNum)" }
-                if ($sub.Burn)        { $hbArgs += "--subtitle-burned=$($sub.SubtitleList.Split(',')[0])" }
-                if ($sub.Default -contains $true) { $hbArgs += "--subtitle-default=$($sub.Default.IndexOf($true)+1)" } 
-                else { $hbArgs += "--subtitle-default=none" }
-            }
-        }
-
-        #Write-Host "DEBUG: hbargs $hbArgs"
-        #exit
-        
-        & $handBrakePath @hbArgs 2>> $logFile 3>$null
-        $failed = $false
-        if ($LASTEXITCODE -ne 0) { Write-Log "  FAILED - HandBrake exit $LASTEXITCODE" -Color Red; $failed=$true }
-        if (-not (Test-Path $outputFile)) { Write-Log "  FAILED - Output not created" -Color Red; $failed=$true }
-        elseif ((Get-Item $outputFile).Length -lt ($vid.VideoObject.Length*0.1)) { Write-Log "  FAILED - Output too small" -Color Red; $failed=$true }
-
-        if ($failed) { if (Test-Path $outputFile) { Remove-Item $outputFile -Force }; continue }
-
-        $compression = [math]::Round(((Get-Item $outputFile).Length/$vid.VideoObject.Length)*100,1)
-        Write-Log "  SUCCESS! Compression: $compression%" -Color Green
-        Move-Item $vid.VideoObject.FullName "$garbageDir\$($vid.VideoObject.Name).old"
+        $success = Invoke-Encode -Plan $encodingPlan -OutputPath $outputFile `
+            -handBrakePath $handBrakePath -logFile $logFile -DryRun:$DryRun
+        if (-not $success){ continue }
+            Move-Item $vid.VideoObject.FullName "$garbageDir\$($vid.VideoObject.Name).old"
         if ((Get-Item $vid.VideoObject.DirectoryName).GetFileSystemInfos().Count -eq 0) { Remove-Item $vid.VideoObject.DirectoryName }
         $completed++
     }
@@ -375,7 +345,7 @@ function Invoke-SubReviewMode {
 		Write-Log "`nAnalyzing: $fileName" -Color Cyan
 
 		#$info      = Get-MkvSubtitleInfo -FilePath $file.FullName
-        $info = Get-Metadata -FilePath $file.FullName
+        $info = Get-Metadata -VideoPath $file.FullName -handBrakePath $handBrakePath -ffprobePath $ffprobePath
 		$subtitles = $info.Subtitles
 
 		if ($subtitles.Count -eq 0) { Write-Log "  No subtitles found - skipping" -Color Yellow; continue }
@@ -436,7 +406,7 @@ function Invoke-SubReviewMode {
         if (-not (Test-Path $outputDir)) { New-Item $outputDir -ItemType Directory | Out-Null; Write-Log "  Created: $outputDir" -Color Yellow }
         $outputFile = Join-Path $outputDir $fileName
 
-        $info = Get-MkvSubtitleInfo -FilePath $file.FullName
+        $info = Get-Metadata -VideoPath $file.FullName -handBrakePath $handBrakePath -ffprobePath $ffprobePath -mkvmergePath $mkvmergePath -mediaInfoPath $mediaInfoPath -ffmpegPath $ffmpegPath
         $success = Invoke-SubRemux -InputFile $file.FullName -OutputFile $outputFile -OrderedTracks $orderedTracks -AllTracks $info.AllTracks -AllClassifications $item.Classification
         if ($success) {
             $garbageDir = Join-Path $garbageBaseDir $folderName
@@ -460,7 +430,7 @@ function Invoke-SubReviewMode {
 
 function Save-Classification {
     param(
-        [Parameter(Mandatory=$true)][hashtable]$Classifications,
+        [Parameter(Mandatory=$true)][object]$Classifications,
         [Parameter(Mandatory=$true)][string]$ClassificationsFile
     )
     $Classifications | ConvertTo-Json -Depth 5 | Out-File -FilePath $ClassificationsFile -Encoding UTF8
