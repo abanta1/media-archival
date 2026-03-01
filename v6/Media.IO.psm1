@@ -55,8 +55,6 @@ function Test-Dependency {
     }
 }
 
-<<<<<<< HEAD
-=======
 function Get-Vid {
     param([Parameter(mandatory=$true)][string]$SrcDirPath,[string]$DstDirPath,[int]$VidCountIn)
 
@@ -419,7 +417,6 @@ function Get-SpectralFlatness {
     return ($vals | Sort-Object)[[int]($vals.Count/2)]
 }
 
->>>>>>> aef929562c8946ad50f17bb1564f411315fb2bc7
 function Read-Srt {
     param([string]$srtPath)
 
@@ -438,11 +435,7 @@ function Read-VobSubIdx (){
     if (-not (Test-Path $idxPath)) { Write-Log "  WARNING: .idx not found: $idxPath" -Color Red; return $info }
     
     foreach ($line in (Get-Content $idxPath)) {
-<<<<<<< HEAD
-        if ($line -match '^id:\s*([a-z]{2,3})') { $info.IsoCode = Convert-IsoCode $matches[1]; $info.Language = $info.IsoCode }
-=======
         if ($line -match '^id:\s*([a-z]{2,3})') { $info.IsoCode = $matches[1]; $info.Language = $info.IsoCode }
->>>>>>> aef929562c8946ad50f17bb1564f411315fb2bc7
         if ($line -match '(?i)forced\s*subs:\s*on')             { $info.IsForced = $true }
         if ($line -match '(?i)(sdh|hearing.impaired|closed.caption|cc)') { $info.IsSDH = $true }
         if ($line -match '(?i)commentary')                       { $info.IsCommentary = $true }
@@ -454,8 +447,4 @@ function Read-VobSubIdx (){
     return $info
 }
 
-<<<<<<< HEAD
-Export-ModuleMember -Function Write-Log, Find-Tool, Test-Dependency, Read-Srt, Read-VobSubIdx
-=======
 Export-ModuleMember -Function Write-Log, Find-Tool, Test-Dependency, Get-Vid, Get-RawMetadata, Get-AudioLRA, Get-CenterRMS, Get-SpectralFlatness, Read-Srt, Read-VobSubIdx
->>>>>>> aef929562c8946ad50f17bb1564f411315fb2bc7
