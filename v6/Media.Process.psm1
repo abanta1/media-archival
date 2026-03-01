@@ -23,9 +23,9 @@ function Invoke-EncodeMode {
     )
 
     if ($null -eq $VidCountIn -or $VidCountIn -eq 0){
-        $vids = Get-Vid -SrcDirPath $SrcDir
+        $vids = Get-Vid -SrcDirPath $SrcDir -DstDirPath $DstDir
     } else {
-        $vids = Get-Vid -SrcDirPath $SrcDir -VidCount $VidCountIn
+        $vids = Get-Vid -SrcDirPath $SrcDir -DstDirPath $DstDir -VidCount $VidCountIn
     }
     if ($vids.Count -eq 0) { return }
 
