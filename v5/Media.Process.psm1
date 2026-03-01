@@ -58,8 +58,8 @@ function Invoke-EncodeMode {
 		if ($adTrack -and ($adTrack -is [int])) {
 			$t = $audioInfo.Tracks | Where-Object TrackKey -eq $adTrack
 			if ($t) {
-				$t.IsAD.Value = $true
-				$t.IsCommentary.Value = $false
+				$t.IsAD = $true
+				$t.IsCommentary = $false
 				Write-Log "  Detected AD Track: $($t.TrackNum) with a" -NoNewLine -Color Green
 				Write-Log "$($adConfidence)" -NoNewLine -Color Red -NoTimeStamp
 				Write-Log "confidence" -Color Green -NoTimeStamp
@@ -82,8 +82,8 @@ function Invoke-EncodeMode {
         if ($hasBitmap.Count -gt 0) { Write-Log "    Found $($hasBitmap.Count) bitmap subtitle tracks" -Color Yellow }
 
 		$primaryAudio = $audioInfo.Tracks[0]
-		
-        $subPlan = New-SubtitleMuxPlan -SubTracks $subtitleTracks -PrimaryAudioIso $primaryAudio.IsoCode.Value
+
+        $subPlan = New-SubtitleMuxPlan -SubTracks $subtitleTracks -PrimaryAudioIso $primaryAudio.IsoCode
 		$effectiveBitmap = @($subPlan.Plan | Where-Object { $_.SourceType -eq 'Bitmap' })
 
 		Write-Log "  Selecting Preset" -Color Yellow
@@ -108,6 +108,9 @@ function Invoke-EncodeMode {
                 Default  = $entry.Default
                 Forced   = $entry.Forced
                 Type     = $entry.Role
+                SourceType = $entry.SourceType
+                IsBitmap = ($entry.SourceType -eq 'Bitmap')
+                IsText   = ($entry.SourceType -eq 'Text')
                 NameType = if ($entry.Role -eq 'forced' -or $entry.Role -eq 'forced-foreign') { 'Forced' }
                         elseif ($entry.Role -eq 'sdh') { 'SDH' }
                         elseif ($entry.Role -eq 'commentary') { 'Commentary' } else { 'Standard' }
@@ -121,17 +124,9 @@ function Invoke-EncodeMode {
             foreach ($k in $keys) {
                 $track = $subtitleTracks | Where-Object { $_.TrackKey -eq $k } | Select-Object -First 1
                 if ($track -and $track.Title) {
-                    $names += $track.Title 
-                } elseif (-not [string]::IsNullOrEmpty($track.Language)) {
-                    if ($track.Language.Length -eq 2){
-                        $langIsoCode = Convert-IsoCode $track.Language
-                    } elseif ($track.Language.Length -eq 3){
-                        $langIsoCode = $track.Language
-                    } else { $langIsoCode = $null }
-                    if (-not $null -eq $langIsoCode){
-                        $longLanguage = Convert-IsoToLanguage $langIsoCode
-                    } else { $longLanguage = $track.Language }
-                    $names += (Get-ProposedTrackName $longLanguage)
+                    $names += $track.Title
+                } elseif ($track -and -not [string]::IsNullOrEmpty($track.Language)) {
+                    $names += (Get-ProposedTrackName $track.Language)
                 } else { $names += "Unknown" }
             }
         }
@@ -175,7 +170,8 @@ function Invoke-EncodeMode {
                 'File Ext'= if($i-eq 0){$video.Extension}else{""}
                 Audio     = if($i-lt $audioLines.Count){$audioLines[$i]}else{""}
                 SubTitle  = if($i-lt $subArr.Count){$subArr[$i]}else{""}
-                'Sub Action'=if($i-lt $subArr.Count){if($video.IsTextSub.IsText){"Process"}else{"Copy"}}else{""}
+                Type      = if($i -lt $subArr.Count){if($sub.Classifications[$i].IsBitmap){"Bitmap"}elseif($sub.Classifications[$i].IsText){"Text"}else{""}}else{""}
+                'Sub Action'=if($i-lt $subArr.Count){if($sub.Classifications[$i].IsText){"Process"}else{"Copy"}}else{""}
                 Default   = if($i-lt $sub.Classifications.Count){$sub.Classifications[$i].Default}else{""}
                 Burn      = if($i-lt $subArr.Count){$sub.Burn}else{""}
                 Forced    = if($i-lt $sub.Classifications.Count){$sub.Classifications[$i].Forced}else{""}
@@ -190,6 +186,7 @@ function Invoke-EncodeMode {
 		@{Expression="File Ext";Width=10}
         @{Expression="Audio";Width=60}
 		@{Expression="SubTitle";Width=10}
+        @{Expression="Type";Width=10}
 		@{Expression="Sub Action";Width=10}
         @{Expression="Default";Width=7}
 		@{Expression="Burn";Width=7}

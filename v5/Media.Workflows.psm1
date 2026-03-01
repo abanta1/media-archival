@@ -125,15 +125,29 @@ function New-SubtitleMuxPlan {
     if ($null -eq $SubTracks){
         Write-Log "WARN: No subs found" -Color Yellow
     }
+
+    $SubTracks = $SubTracks | ForEach-Object {
+        if ($_.IsoCode -match '[a-z]{2,3}'){
+            $_.IsoCode = Convert-IsoCode $_.IsoCode
+            $_
+        }
+    }
     
-    $SubTracks = $SubTracks | Where-Object { $allowedIso -contains $_.IsoCode }
+    $SubTracks = $SubTracks | Where-Object { 
+        if ($allowedIso -contains $_.IsoCode) { 
+            $true 
+        } else {
+            Write-Log "    Dropping track $($_.TrackKey) with ISO '$($_.IsoCode)' (not in allowed list)" -Color DarkGray
+            $false
+        }
+    }
     
     $i = $SubTracks[0].TrackKey - 1
     $classified = foreach ($t in $SubTracks) {
         $cl = Get-SubtitleClassification -Subtitle $t -AllSubtitles $SubTracks
         if ($cl.Confidence -eq 'Low') { $needsManualReview = $true }
 
-        Write-Log "    [$i] Track $($t.TrackKey): $(Convert-IsoToLanguage $t.Language) $($cl.Type)" -Color Cyan
+        Write-Log "    [$i] Track $($t.TrackKey): $($t.Language) $($cl.Type)" -Color Cyan
         
         [PSCustomObject]@{
             Track        = $t
@@ -152,8 +166,7 @@ function New-SubtitleMuxPlan {
     # 1. ENG standard (first)
     $ordered += $classified |
         Where-Object { $_.IsoCode -eq 'eng' -and $_.Type -eq 'standard' } |
-        Sort-Object { $_.Track.TrackKey } |
-        Select-Object -First 1
+        Sort-Object { $_.Track.TrackKey }
 
     # 2. ENG SDH
     $ordered += $classified |
@@ -169,7 +182,7 @@ function New-SubtitleMuxPlan {
     $ordered += $classified |
         Where-Object { $_.IsoCode -ne 'eng' -and $_.Type -ne 'commentary' } |
         Group-Object { $_.IsoCode } |
-        ForEach-Object { $_.Group | Select-Object -First 1 }
+        ForEach-Object { $_.Group }
 
     # 5. ENG commentary
     $ordered += $classified |
@@ -194,8 +207,7 @@ function New-SubtitleMuxPlan {
         $existingMatch = $deduped | Where-Object { 
             $_.Language -eq $entry.Language -and 
             $_.Role -eq $entry.Role -and (
-                ($_.ElementCount -gt 0 -and $entry.ElementCount -gt 0 -and [Math]::Abs($_.ElementCount - $entry.ElementCount) / $_.ElementCount -lt 0.12) -or 
-                ($_.ElementCount -eq 0 -or $entry.ElementCount -eq 0)
+                ($_.ElementCount -gt 0 -and $entry.ElementCount -gt 0 -and [Math]::Abs($_.ElementCount - $entry.ElementCount) / $_.ElementCount -lt 0.12)
             )
         }
 
@@ -553,4 +565,4 @@ function Get-UserClassification {
     return $classifications
 }
 
-Export-ModuleMember -Function New-AudioStrategy, New-SubtitleMuxPlan, Get-SubtitleClassification, Get-ProposedTrackName, Get-SuggestedType, Get-OrderedTrack, Select-Preset, Export-SubtitleTrack, New-RemuxWithSubtitles, Get-UserClassification
+Export-ModuleMember -Function New-AudioStrategy, New-SubtitleMuxPlan, Get-SubtitleClassification, Get-ProposedTrackName, Get-SuggestedType, Get-OrderedTrack, Select-Preset, Export-SubtitleTrack, New-RemuxWithSubtitles, Get-UserClassification, Convert-IsoCode, Convert-IsoToLanguage

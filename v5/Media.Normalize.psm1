@@ -40,8 +40,8 @@ function Convert-IsoCode {
         "en"    { "eng"; break }
         "eng"   { "eng"; break }
         "fr"    { "fra"; break }
-        "fre"   { "fre"; break }
-        "fra"   { "fre"; break }
+        "fre"   { "fra"; break }
+        "fra"   { "fra"; break }
         "es"    { "spa"; break }
         "spa"   { "spa"; break }
         "it"    { "ita"; break }
