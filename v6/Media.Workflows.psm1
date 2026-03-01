@@ -575,4 +575,4 @@ function Get-UserClassification {
     return $classifications
 }
 
-Export-ModuleMember -Function Get-ADAnalysis, New-AudioStrategy, New-SubtitleMuxPlan, Get-ProposedTrackName, Get-OrderedTrack, Select-Preset, Get-UserClassification
+Export-ModuleMember -Function Get-ADAnalysis, New-AudioStrategy, New-SubtitleMuxPlan, Get-ProposedTrackName, Get-OrderedTrack, Get-UserClassification

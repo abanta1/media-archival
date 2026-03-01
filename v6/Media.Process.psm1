@@ -295,8 +295,11 @@ function Invoke-EncodeMode {
 
         $success = Invoke-Encode -Plan $encodingPlan -OutputPath $outputFile `
             -handBrakePath $handBrakePath -logFile $logFile -DryRun:$DryRun
+
         if (-not $success){ continue }
-            Move-Item $vid.VideoObject.FullName "$garbageDir\$($vid.VideoObject.Name).old"
+
+        Move-Item $vid.VideoObject.FullName "$garbageDir\$($vid.VideoObject.Name).old"
+
         if ((Get-Item $vid.VideoObject.DirectoryName).GetFileSystemInfos().Count -eq 0) { Remove-Item $vid.VideoObject.DirectoryName }
         $completed++
     }
@@ -485,6 +488,7 @@ function Invoke-MetadataRemux {
         Write-Log "=================================================" -Color Gray
         foreach ($track in $item.Tracks) {
             Write-Log "  Track $($track.Id) [$($track.Type)]" -Color Cyan
+#######            
             Write-Log "  Current:  " -NoNewline 
             Write-Log "'$($track.CurrentName)'"  -Color Yellow
             Write-Log "  Proposed: " -NoNewline
