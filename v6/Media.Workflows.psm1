@@ -1,3 +1,105 @@
+function Get-ADAnalysis {
+    param(
+        [array]$AudioTracks,
+        [string]$FilePath,
+        [string]$ffmpegPath
+    )
+
+    Write-Log " Detecting AD Track (unified)..." -Color Yellow
+
+    # Candidates: English, non-commentary
+    $eng = $AudioTracks | Where-Object { $_.IsEnglish.Value -and -not $_.IsCommentary.Value }
+    
+    if ($eng.Count -ne 2) {
+        Write-Log "  INFO: Need exactly 2 English non-commentary tracks, found $($eng.Count) - skipping AD detection" -Color White -NoHost
+        return $null
+    }
+
+    # --- FEATURE EXTRACTION --------------------------------------------------
+
+    $f1_metaAD = if ($eng[0].IsAD) { 1 } else { 0 }
+    $f2_metaAD = if ($eng[1].IsAD) { 1 } else { 0 }
+    
+    $f1_metaCom = if ($eng[0].IsCommentary) { 1 } else { 0 }
+    $f2_metaCom = if ($eng[1].IsCommentary) { 1 } else { 0 }
+
+    # Center RMS (5.1+)
+    Write-Log "  Center channel RMS..." -Color Yellow
+    if ($eng[0].Channels -ge 5.1 -and $eng[1].Channels -ge 5.1) {
+        $r1 = Get-CenterRMS -FilePath $FilePath -TrackKey ($eng[0].TrackKey - 1) -ffmpegPath $ffmpegPath
+        $r2 = Get-CenterRMS -FilePath $FilePath -TrackKey ($eng[1].TrackKey - 1) -ffmpegPath $ffmpegPath
+        $maxR = [math]::Max($r1, $r2)
+        $f1_rms = ($maxR - $r1) / 10
+        $f2_rms = ($maxR - $r2) / 10
+    } else {
+        $f1_rms = 0; $f2_rms = 0
+    }
+
+    # LRA
+    Write-Log "  Loudness Range (LRA)..." -Color Yellow
+    $l1 = Get-AudioLRA -FilePath $FilePath -StreamIndex ($eng[0].TrackKey - 1) -ffmpegPath $ffmpegPath
+    $l2 = Get-AudioLRA -FilePath $FilePath -StreamIndex ($eng[1].TrackKey - 1) -ffmpegPath $ffmpegPath
+    $maxL = [math]::Max($l1, $l2)
+    $f1_lra = ($maxL - $l1)
+    $f2_lra = ($maxL - $l2)
+
+    # Spectral flatness (stereo fallback)
+    if ($eng[0].Channels -le 2.0 -and $eng[1].Channels -le 2.0) {
+        $sf1 = Get-SpectralFlatness -FilePath $FilePath -StreamIndex ($eng[0].TrackKey - 1) -ffmpegPath $ffmpegPath
+        $sf2 = Get-SpectralFlatness -FilePath $FilePath -StreamIndex ($eng[1].TrackKey - 1) -ffmpegPath $ffmpegPath
+        $maxSF = [math]::Max($sf1, $sf2)
+        $f1_sf = ($maxSF - $sf1) * 10
+        $f2_sf = ($maxSF - $sf2) * 10
+    } else {
+        $f1_sf = 0; $f2_sf = 0
+    }
+
+    # Base from Detect-ADTrack
+    $score1 = 10*$f1_metaAD - 4*$f1_metaCom + 7*$f1_rms + 5*$f1_lra + 4*$f1_sf
+    $score2 = 10*$f2_metaAD - 4*$f2_metaCom + 7*$f2_rms + 5*$f2_lra + 4*$f2_sf
+
+    $lraDelta = [math]::Abs($l1 - $l2)
+    if ($lraDelta -gt 1.0) {
+        if ($l1 -lt $l2) { $score1 += 7; } 
+        else { $score2 += 7; } 
+    }
+
+    $delta = [math]::Abs($score1 - $score2)
+    
+    if ($delta -lt 3) {
+        return $null
+    }
+
+    $winnerTrack = if ($score1 -gt $score2) { $eng[0] } else { $eng[1] }
+    $confidence = if ($delta -ge 12) { 'High' } elseif ($delta -ge 6) { 'Medium' } else { 'Low' }
+
+    [PSCustomObject]@{
+        ADTrackNum = $winnerTrack.TrackKey
+        Confidence = $confidence
+        ScoreDelta = $delta
+        Tracks     = @(
+            [PSCustomObject]@{
+                TrackKey = $eng[0].TrackKey
+                Score   = $score1
+                LRA     = $l1
+                CenterRMS = $f1_rms
+                MetaAD    = $f1_metaAD
+                MetaCom   = $f1_metaCom
+                Spectral  = $f1_sf
+            },
+            [PSCustomObject]@{
+                TrackKey = $eng[1].TrackKey
+                Score   = $score2
+                LRA     = $l2
+                CenterRMS = $f2_rms
+                MetaAD    = $f2_metaAD
+                MetaCom   = $f2_metaCom
+                Spectral  = $f2_sf
+            }
+        )
+    }
+}
+
 function New-AudioStrategy {
     param([array]$AudioTracks)
 
@@ -565,4 +667,4 @@ function Get-UserClassification {
     return $classifications
 }
 
-Export-ModuleMember -Function New-AudioStrategy, New-SubtitleMuxPlan, Get-SubtitleClassification, Get-ProposedTrackName, Get-SuggestedType, Get-OrderedTrack, Select-Preset, Export-SubtitleTrack, New-RemuxWithSubtitles, Get-UserClassification, Convert-IsoCode, Convert-IsoToLanguage
+Export-ModuleMember -Function Get-ADAnalysis, New-AudioStrategy, New-SubtitleMuxPlan, Get-SubtitleClassification, Get-ProposedTrackName, Get-SuggestedType, Get-OrderedTrack, Select-Preset, Export-SubtitleTrack, New-RemuxWithSubtitles, Get-UserClassification, Convert-IsoCode, Convert-IsoToLanguage
