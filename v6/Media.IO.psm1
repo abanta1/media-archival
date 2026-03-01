@@ -435,7 +435,7 @@ function Read-VobSubIdx (){
     if (-not (Test-Path $idxPath)) { Write-Log "  WARNING: .idx not found: $idxPath" -Color Red; return $info }
     
     foreach ($line in (Get-Content $idxPath)) {
-        if ($line -match '^id:\s*([a-z]{2,3})') { $info.IsoCode = $matches[1] } else { $info.Language = $info.IsoCode }
+        if ($line -match '^id:\s*([a-z]{2,3})') { $info.IsoCode = $matches[1]; $info.Language = $info.IsoCode }
         if ($line -match '(?i)forced\s*subs:\s*on')             { $info.IsForced = $true }
         if ($line -match '(?i)(sdh|hearing.impaired|closed.caption|cc)') { $info.IsSDH = $true }
         if ($line -match '(?i)commentary')                       { $info.IsCommentary = $true }
