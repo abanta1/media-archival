@@ -90,7 +90,7 @@ function New-AudioStrategy {
     $AudioTracks | Where-Object { -not $_.IsEnglish -and -not $_.IsCommentary -and $allowedLangs -contains $_.IsoCode } |
         Group-Object Language | ForEach-Object { $_.Group | Sort-Object @{Expression='Quality'; Descending=$true}, TrackKey | Select-Object -First 1 } |
         ForEach-Object {
-            $n="$($langDisplayMap[$_.IsoCode]) Stereo"
+            $n="$(Convert-IsoToLanguage $_.IsoCode) Stereo"
             $s.Tracks+=$_.TrackKey; $s.Encoders+="av_aac"; $s.Mixdowns+="stereo"; $s.Bitrates+=128; $s.Names+=$n
             Write-Log "    [$i] Track $($_.TrackKey): $n (AAC 128kbps)" -Color Yellow
             $s.DescriptionList += "[$i] Track $($_.TrackKey): $n (AAC 128kbps)"; $i++
@@ -489,7 +489,7 @@ function Get-UserClassification {
             "standard"      {"Standard"} "sdh"{"SDH"} "commentary"{"Commentary"}
             "forced"        {"Forced"}   "foreign"{"Foreign Standard"} "forced-foreign"{"Forced Foreign (Auto-Skip)"}
         }
-        $langDisp = if ($langDisplayMap[$sub.Language]) { $langDisplayMap[$sub.Language] } else { $sub.Language.ToUpper() }
+        $langDisp = Convert-IsoToLanguage $sub.IsoCode
         $trackDesc = switch ($sugType) {
             "standard"      {"Standard - [$langDisp]"} "sdh"{"SDH - [$langDisp]"} "commentary"{"Commentary - [$langDisp]"}
             "forced"        {"Forced - [$langDisp]"} "foreign"{"Standard - [$langDisp]"} "forced-foreign"{"Forced - [$langDisp] (will skip)"}

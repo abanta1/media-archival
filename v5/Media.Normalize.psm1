@@ -101,9 +101,4 @@ function Convert-SubCodecType {
     return $newCodec
 }
 
-$langDisplayMap = @{
-    "eng" = "English"; "fra" = "Français"; "spa" = "Español"
-    "ita" = "Italiano"; "rus" = "Русский"; "deu" = "Deutsch"
-}
-
 Export-ModuleMember -Function Convert-AudioCodecName, Convert-ChannelCount, Convert-IsoCode, Convert-IsoToLanguage, Convert-SubCodecType
