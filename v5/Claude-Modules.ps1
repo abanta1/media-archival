@@ -12,7 +12,6 @@ param(
 	[Parameter(mandatory=$true)]
 	[string]$GbgDir
 )
-Write-Host "DEBUG: vidcount $VidCountIn"
 
 $moduleName = @(
 	"Media.IO.psm1",
@@ -55,7 +54,6 @@ $mediaInfoPath   = Find-Tool "MediaInfo.exe"    $searchRoots
 $null = $vobsubDir, $encodedBaseDir, $garbageBaseDir, $classificationsFile, $metaSourceDir, $metaOutputDir,
         $ffmpegPath, $ffprobePath, $mkvmergePath, $mkvextractPath, $mkvpropeditPath, $handBrakePath, $mediaInfoPath
 
-Write-Host "DEBUG: vidcount $vidCount"
 # ============================================
 # DISPATCH
 # ============================================

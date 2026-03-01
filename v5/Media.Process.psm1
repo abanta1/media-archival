@@ -13,9 +13,7 @@ function Invoke-EncodeMode {
         [string]$mediaInfoPath,
         [switch]$DryRun
     )
-    Write-host "DEBUG: vidcount $VidCountIn"
-    Write-Host "DEBUG: SrcDir=$SrcDir"
-    Write-Host "DEBUG: ffmpegPath=$ffmpegPath"
+    
     Test-Dependency @(
         @{ Name="FFmpeg";       Path=$ffmpegPath    }
         @{ Name="mkvmerge";     Path=$mkvmergePath  }
@@ -24,7 +22,6 @@ function Invoke-EncodeMode {
         @{ Name="HandBrakeCLI"; Path=$handBrakePath  }
     )
 
-    write-host "DEBUG: vidcount $VidCountIn"
     if ($null -eq $VidCountIn -or $VidCountIn -eq 0){
         $vids = Get-Vid -SrcDirPath $SrcDir
     } else {

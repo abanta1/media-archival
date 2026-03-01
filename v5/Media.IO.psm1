@@ -40,7 +40,7 @@ function Find-Tool {
 function Test-Dependency {
     param([Parameter(Mandatory=$true)][array]$Deps)
 
-    Write-Log "`nChecking dependencies..." -Color Cyan
+    Write-Log "Checking dependencies..." -Color Cyan
     $missing = foreach ($dep in $Deps) {
         $exists = (Test-Path $dep.Path -PathType Leaf)
         if (-not $exists) { 
