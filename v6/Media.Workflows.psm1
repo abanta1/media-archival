@@ -1,5 +1,3 @@
-<<<<<<< HEAD
-=======
 function Get-ADAnalysis {
     param(
         [array]$AudioTracks,
@@ -102,7 +100,6 @@ function Get-ADAnalysis {
     }
 }
 
->>>>>>> aef929562c8946ad50f17bb1564f411315fb2bc7
 function New-AudioStrategy {
     param([array]$AudioTracks)
 
