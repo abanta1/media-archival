@@ -11,11 +11,7 @@ function Write-Log {
         [switch]$NoTimeStamp,
         [switch]$NoHost
     )
-<<<<<<< HEAD
-    $timestamp = if ($NoTimeStamp) { "" } else { "[$([DateTime]::Now.ToString('yyyy-MM-Ddd HH:mm:ss'))]" }
-=======
     $timestamp = if ($NoTimeStamp) { "" } else { "[$([DateTime]::Now.ToString('yyyy-MM-dd HH:mm:ss'))]" }
->>>>>>> aef929562c8946ad50f17bb1564f411315fb2bc7
     $logMessage = "$timestamp $Message"
 
     if (-not $NoHost) {
