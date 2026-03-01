@@ -30,7 +30,6 @@ function Get-Metadata {
     }
 }
 
-
 function Resolve-Field {
     param([string]$FieldName, [hashtable]$Values, [hashtable]$Weights)
 
@@ -394,36 +393,24 @@ function Merge-AudioMetadata {
 function Merge-VideoMetadata {
 param([object]$RawMetaData, [hashtable]$Weights)
 
-    $hbVideoTracks = $RawMetaData.HbVideo
-    $ffVideoTracks = $RawMetaData.FfVideo
-    $mkvVideoTracks = $RawMetaData.MkvJVideo
-    $miVideoTracks = $RawMetaData.MiVideo
+    $height = Resolve-Field "Video Height" @{
+        HandBrake = $RawMetaData.HbVideo.Height
+        MediaInfo = $RawMetaData.MiVideo.Height
+        MKVMerge = $RawMetaData.MkvJVideoHeight
+        FFProbe = $RawMetaDta.FfVideo.Height
+    } $weights
 
-    $vidTracks = @()
-    foreach ($track in $hbVideoTracks) {
-        $height = Resolve-Field "Video Height" @{
-            HandBrake = $track.Height
-            MediaInfo = $miVideoTracks.Height
-            MKVMerge = $mkvVideoTracks.Height
-            FFProbe = $ffVideoTracks.Height
-         } $weights
-
-         $width = Resolve-Field "Video Width" @{
-            HandBrake = $track.Width
-            MediaInfo = $miVideoTracks.Width
-            MKVMerge = $mkvVideoTracks.Width
-            FFProbe = $ffVideoTracks.Width
-         } $weights
-
-         $vidTracks += [PSCustomObject]@{
-            Width = $width
-            Height = $height
-        }
+        $width = Resolve-Field "Video Width" @{
+        HandBrake = $RawMetaData.HbVideo.Width
+        MediaInfo = $RawMetaDta.MiVideo.Width
+        MKVMerge = $RawMetaData.MkvJVideo.Width
+        FFProbe = $RawMetaData.FfVideo.Width
+    } $weights
+   
+    return $vidTracks += [PSCustomObject]@{
+        Width = $width
+        Height = $height
     }
-
-    $unifiedVideo = $vidTracks
-
-    return $unifiedVideo
 }
 
 function Merge-SubtitleMetadata {
@@ -434,6 +421,7 @@ function Merge-SubtitleMetadata {
     $mkvJSubTracks = $RawMetaData.MkvJSubs
     $mkvISubTracks = $RawMetaData.MkvISubs
     $miSubTracks = $RawMetaData.MiSubs
+    $ffPacketInfo = $RawMetaData.FfPackets
     
     Write-Log "  Processing subtitle metadata..." -Color Green
 
@@ -746,135 +734,11 @@ function Merge-SubtitleMetadata {
     return $unifiedSubs
 }
 
-function Get-SubtitleHash (){
-    param([string]$basePath)
-
-    foreach ($ext in @(".srt",".sup",".ass")) {
-        $f = "$basePath$ext"
-        if (Test-Path $f) {
-            $bytes = [Text.Encoding]::UTF8.GetBytes((Get-Content $f -Raw -Encoding UTF8))
-            return (Get-FileHash -InputStream ([IO.MemoryStream]::new($bytes))).Hash
-        }
-    }
-
-    $idx = "$basePath.idx"; $sub = "$basePath.sub"
-    
-    if ((Test-Path $idx) -and (Test-Path $sub)) {
-        return (Get-FileHash -InputStream ([IO.MemoryStream]::new([IO.File]::ReadAllBytes($sub)))).Hash
-    }
-
-    Write-Log "  WARNING: Could not hash subtitle at $basePath" -Color Red
-    
-    return ""
-}
-
-function Get-ADAnalysis {
-    param(
-        [array]$AudioTracks,
-        [string]$FilePath,
-        [string]$ffmpegPath
-    )
-
-    Write-Log " Detecting AD Track (unified)..." -Color Yellow
-
-    # Candidates: English, non-commentary
-    $eng = $AudioTracks | Where-Object { $_.IsEnglish.Value -and -not $_.IsCommentary.Value }
-    
-    if ($eng.Count -ne 2) {
-        Write-Log "  INFO: Need exactly 2 English non-commentary tracks, found $($eng.Count) - skipping AD detection" -Color White -NoHost
-        return $null
-    }
-
-    # --- FEATURE EXTRACTION --------------------------------------------------
-
-    $f1_metaAD = if ($eng[0].IsAD.Value) { 1 } else { 0 }
-    $f2_metaAD = if ($eng[1].IsAD.Value) { 1 } else { 0 }
-    
-    $f1_metaCom = if ($eng[0].IsCommentary.Value) { 1 } else { 0 }
-    $f2_metaCom = if ($eng[1].IsCommentary.Value) { 1 } else { 0 }
-
-    # Center RMS (5.1+)
-    Write-Log "  Center channel RMS..." -Color Yellow
-    if ($eng[0].Channels.Value -ge 5.1 -and $eng[1].Channels.Value -ge 5.1) {
-        $r1 = Get-CenterRMS -FilePath $FilePath -TrackKey ($eng[0].TrackKey - 1) -ffmpegPath $ffmpegPath
-        $r2 = Get-CenterRMS -FilePath $FilePath -TrackKey ($eng[1].TrackKey - 1) -ffmpegPath $ffmpegPath
-        $maxR = [math]::Max($r1, $r2)
-        $f1_rms = ($maxR - $r1) / 10
-        $f2_rms = ($maxR - $r2) / 10
-    } else {
-        $f1_rms = 0; $f2_rms = 0
-    }
-
-    # LRA
-    Write-Log "  Loudness Range (LRA)..." -Color Yellow
-    $l1 = Get-AudioLRA -FilePath $FilePath -StreamIndex ($eng[0].TrackKey - 1) -ffmpegPath $ffmpegPath
-    $l2 = Get-AudioLRA -FilePath $FilePath -StreamIndex ($eng[1].TrackKey - 1) -ffmpegPath $ffmpegPath
-    $maxL = [math]::Max($l1, $l2)
-    $f1_lra = ($maxL - $l1)
-    $f2_lra = ($maxL - $l2)
-
-    # Spectral flatness (stereo fallback)
-    if ($eng[0].Channels.Value -le 2.0 -and $eng[1].Channels.Value -le 2.0) {
-        $sf1 = Get-SpectralFlatness -FilePath $FilePath -StreamIndex ($eng[0].TrackKey - 1) -ffmpegPath $ffmpegPath
-        $sf2 = Get-SpectralFlatness -FilePath $FilePath -StreamIndex ($eng[1].TrackKey - 1) -ffmpegPath $ffmpegPath
-        $maxSF = [math]::Max($sf1, $sf2)
-        $f1_sf = ($maxSF - $sf1) * 10
-        $f2_sf = ($maxSF - $sf2) * 10
-    } else {
-        $f1_sf = 0; $f2_sf = 0
-    }
-
-    # Base from Detect-ADTrack
-    $score1 = 10*$f1_metaAD - 4*$f1_metaCom + 7*$f1_rms + 5*$f1_lra + 4*$f1_sf
-    $score2 = 10*$f2_metaAD - 4*$f2_metaCom + 7*$f2_rms + 5*$f2_lra + 4*$f2_sf
-
-    $lraDelta = [math]::Abs($l1 - $l2)
-    if ($lraDelta -gt 1.0) {
-        if ($l1 -lt $l2) { $score1 += 7; } 
-        else { $score2 += 7; } 
-    }
-
-    $delta = [math]::Abs($score1 - $score2)
-    
-    if ($delta -lt 3) {
-        return $null
-    }
-
-    $winnerTrack = if ($score1 -gt $score2) { $eng[0] } else { $eng[1] }
-    $confidence = if ($delta -ge 12) { 'High' } elseif ($delta -ge 6) { 'Medium' } else { 'Low' }
-
-    [PSCustomObject]@{
-        ADTrackNum = $winnerTrack.TrackKey
-        Confidence = $confidence
-        ScoreDelta = $delta
-        Tracks     = @(
-            [PSCustomObject]@{
-                TrackKey = $eng[0].TrackKey
-                Score   = $score1
-                LRA     = $l1
-                CenterRMS = $f1_rms
-                MetaAD    = $f1_metaAD
-                MetaCom   = $f1_metaCom
-                Spectral  = $f1_sf
-            },
-            [PSCustomObject]@{
-                TrackKey = $eng[1].TrackKey
-                Score   = $score2
-                LRA     = $l2
-                CenterRMS = $f2_rms
-                MetaAD    = $f2_metaAD
-                MetaCom   = $f2_metaCom
-                Spectral  = $f2_sf
-            }
-        )
-    }
-}
-
 function Get-QualityScore {
     param([string]$codec)
     if (-not $codec -or $null -eq $codec -or $codec -eq 0 -or $codec -eq "") { return 0 }
     
-    $quality = switch -Regex ($format) {
+    $quality = switch -Regex ($codec) {
              '(?i)TrueHD|FLAC|LPCM|pcm_s16le|pcm_s24le'      { 100 }
              '(?i)DTS-HD MA|DTS-MA|Master Audio'              { 95  }
              '(?i)DTS-HD(?!\s*MA)'                           { 65  }
@@ -889,25 +753,5 @@ function Get-QualityScore {
     return $quality
 }
 
-function Get-ExtractedSubtitle {
-    param([string]$basePath, [int]$trackNum, [bool]$MetadataForced)
-    $r = [PSCustomObject]@{ TrackNum=$trackNum; Language=''; IsForced=$MetadataForced; IsText=$false; IsSDH=$false; IsCommentary=$false; IsoCode=''; IsVobSub=$false; Hash='' }
-    $srt="$basePath.srt"; $idx="$basePath.idx"; $sub="$basePath.sub"; $sup="$basePath.sup"; $ass="$basePath.ass"
-    if (Test-Path $srt) {
-        $r.IsText=$true; $p=Read-Srt -SrtPath $srt
-        $r.IsSDH=$p.IsSDH; $r.IsCommentary=$p.IsCommentary; $r.IsForced=$p.IsForced
-        $iso="eng"; if ($srt -match '\.(spa|fra|ita|rus)\.srt$') { $iso=$matches[1] }
-        $r.Language=$iso; $r.IsoCode=$iso
-    } elseif ((Test-Path $idx) -and (Test-Path $sub)) {
-        $r.IsVobSub=$true; $p=Read-VobSubIdx -IdxPath $idx
-        $r.Language=$p.Language; $r.IsoCode=$p.IsoCode; $r.IsSDH=$p.IsSDH; $r.IsCommentary=$p.IsCommentary
-        if ($MetadataForced -or $p.IsForced) { $r.IsForced=$true }
-    } elseif (Test-Path $sub)  { $r.IsVobSub=$true; $r.IsoCode="und"; $r.Language="und" }
-    elseif (Test-Path $sup)    { $r.IsoCode="und"; $r.Language="und" }
-    elseif (Test-Path $ass)    { $r.IsText=$true; $r.IsoCode="und"; $r.Language="und" }
-    else { Write-Log "  WARNING: No subtitle file found at $basePath" -Color Red }
-    return $r
-}
-
 # Other functions are isolated to this module, not exporting
-Export-ModuleMember -Function Get-Metadata, Get-Vid, Get-ADAnalysis
+Export-ModuleMember -Function Get-Metadata, Get-QualityScore
