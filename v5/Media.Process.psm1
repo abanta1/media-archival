@@ -79,10 +79,11 @@ function Invoke-EncodeMode {
         if ($hasBitmap.Count -gt 0) { Write-Log "    Found $($hasBitmap.Count) bitmap subtitle tracks" -Color Yellow }
 
 		$primaryAudio = $audioInfo.Tracks[0]
-
+Write-Host "DEBUG: subtitletracks count $($subtitleTracks.Count)"
         $subPlan = New-SubtitleMuxPlan -SubTracks $subtitleTracks -PrimaryAudioIso $primaryAudio.IsoCode
-		$effectiveBitmap = @($subPlan.Plan | Where-Object { $_.SourceType -eq 'Bitmap' })
-
+Write-Host "DEBUG: subplan.plan count $($subPlan.Plan.Count)"
+        $effectiveBitmap = @($subPlan.Plan | Where-Object { $_.SourceType -eq 'Bitmap' })
+Write-Host "DEBUG: effective bitmap count $($effectiveBitmap.Count)"
 		Write-Log "  Selecting Preset" -Color Yellow
 		$isDVD         = ($vid.Name -eq "VIDEO_TS")
         $vHeight           = $scan.Video.Height.Value
@@ -94,6 +95,7 @@ function Invoke-EncodeMode {
         # normalize subtitle plan -> legacy schema used by flat plan display
         $planList = @($subPlan.Plan)
         $subtitleList = if ($planList.Count -gt 0) { ($planList.TrackKey -join ",") } else { $null }
+Write-Host "DEBUG: subtitlellist $subtitleList"
         # Burn if any plan entry is Burn
         $burnFlag = ($planList | Where-Object { $_.Action -eq 'Burn' }).Count -gt 0
 
@@ -117,14 +119,18 @@ function Invoke-EncodeMode {
         # Build Names array aligned with subtitleList order (fallback to proposed name)
         $names = @()
         if ($subtitleList) {
-            $keys = $subtitleList.Split(',') | ForEach-Object { $_.Trim() }
-            foreach ($k in $keys) {
-                $track = $subtitleTracks | Where-Object { $_.TrackKey -eq $k } | Select-Object -First 1
+            $subKeys = @($subtitleList.Split(',') | ForEach-Object { $_.Trim() })
+Write-Host "DEBUG: subkeys count $($subKeys.Count)"
+Write-Host "DEBUG: subkey $subKeys"
+Write-Host "DEBUG: subtrack count $($subtitleTracks.Count)"
+            foreach ($subK in $subKeys) {
+                $track = $subtitleTracks | Where-Object { $_.TrackKey -eq $subK } | Select-Object -First 1
                 if ($track -and $track.Title) {
                     $names += $track.Title
                 } elseif ($track -and -not [string]::IsNullOrEmpty($track.Language)) {
                     $names += (Get-ProposedTrackName $track.Language)
                 } else { $names += "Unknown" }
+Write-Host "DEBUG: names $names"
             }
         }
 
@@ -156,6 +162,8 @@ function Invoke-EncodeMode {
 
     # Display plan table
     $flatPlan = foreach ($video in $FullEncodingPlan) {
+Write-Host "DEBUG: vid subtrack count $($video.SubtitleTracks.Count)"
+Write-Host "DEBUG: vid subplannorm $($video.SubtitleStrategy.SubtitleList)" #Good to here
         $sub = $video.SubtitleStrategy
         $subArr = if ($sub.SubtitleList -is [string]) { $sub.SubtitleList.Split(',').Trim() } else { @($sub.SubtitleList) }
         $audioLines = $video.AudioSummary -split "`n"
@@ -203,9 +211,9 @@ function Invoke-EncodeMode {
     }
 
     if ($AnalyzeOnly) { Write-Log "`n-AnalyzeOnly: no encodes started." -Color Yellow; return }
-
-    $confirm = Read-Host "`nProceed with encoding $($vids.Count) files? (Y/N)"
-    if ($confirm -ne "Y") { Write-Log "Aborting." -Color Red; return }
+#Good here
+    #$confirm = Read-Host "`nProceed with encoding $($vids.Count) files? (Y/N)"
+    #if ($confirm -ne "Y") { Write-Log "Aborting." -Color Red; return }
 
     $encodeStart = Get-Date; $completed = 0
     foreach ($vid in $FullEncodingPlan) {
@@ -248,17 +256,23 @@ function Invoke-EncodeMode {
         Write-Log "  Subtitle Strategy:" -Color Yellow
         $sub = $vid.SubtitleStrategy
         $hbSubOrder = @()
-
+Write-Host "DEBUG: B: sub subtitlelist $($sub.SubtitleList)"
         if ($sub.SubtitleList) {
-            $keys = $sub.SubtitleList.Split(',') | ForEach-Object { $_.Trim() }
+            $subKeys = $sub.SubtitleList.Split(',') | ForEach-Object { $_.Trim() }
             $i = 1
-
-            foreach ($k in $keys) {
-                $track = $subtitleTracks | Where-Object { $_.TrackKey -eq $k } | Select-Object -First 1
-                $classification = $sub.Classifications | Where-Object { $_.TrackKey -eq $k } | Select-Object -First 1
-
+Write-Host "DEBUG: subkeys count $($subKeys.Count)"            
+Write-Host "DEBUG: subtrack count $($subtitleTracks.Count)"
+            foreach ($subK in $subKeys) {
+                $track = $subtitleTracks | Where-Object { $_.TrackKey -eq $subK } | Select-Object -First 1
+                $classification = $sub.Classifications | Where-Object { $_.TrackKey -eq $subK } | Select-Object -First 1
+Write-Host "DEBUG: track title $($track.Title)"
+Write-Host "DEBUG: track name $($track.Names)"
+Write-Host "DEBUG: track default $($track.Default)"
+Write-Host "DEBUG: track forced $($track.Forced)"
+Write-Host "DEBUG: sub key $subK"
                 if ($track) {
-                    $hbIndex = [int]$k - $vid.AudioInfo.Tracks.Count
+                    $audioOffset = [int]($subtitleTracks | Sort-Object { [int]$_.TrackKey } | Select-Object -First 1).TrackKey - 1 
+                    $hbIndex = [int]$subK - $audioOffset
                     $trackName = if ($i -le $sub.Names.Count) { $sub.Names[$i-1] } else { "Unknown" }
 
                     $nameType = if ($classification) {
@@ -269,7 +283,7 @@ function Invoke-EncodeMode {
                     if ($sub.Burn) { $nameType += ", Burn" }
                     if ($classification.Forced) { $nameType += ", Forced" }
                     
-                    Write-Log "    [$i] Track $k`: $trackName $nameType" -Color Cyan
+                    Write-Log "    [$i] Track $subK`: $trackName $nameType" -Color Cyan
                     $hbSubOrder += $hbIndex
                     $i++
                 }
@@ -313,8 +327,8 @@ function Invoke-EncodeMode {
             }
         }
 
-        #Write-Host "DEBUG: hbargs $hbArgs"
-        #exit
+        Write-Host "DEBUG: hbargs $hbArgs"
+        exit
         
         & $handBrakePath @hbArgs 2>> $logFile 3>$null
         $failed = $false
