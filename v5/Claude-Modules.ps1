@@ -75,8 +75,8 @@ else {
 	Write-Log "# Scans files, allows editing of track names."
 	Write-Log "-MetadataRemux -DryRun".PadRight(30) -NoNewLine
 	Write-Log "# Scans files, provides a dry run for changing track names. No change to files"
-	Write-Log "-Encode".PadRight(30) -NoNewLine
-	Write-Log "# Scans files. Analyzes video, audio and subtitles subtitles. Creates encoding plan according to logic"
+	Write-Log "-Encode [-VidCount n]".PadRight(30) -NoNewLine
+	Write-Log "# Scans n/all files. Analyzes video, audio and subtitles subtitles. Creates encoding plan according to logic"
 	Write-Log "".PadRight(30) -NoNewLine
 	Write-Log "#   video resolution, types of audio tracks and languages, types of subtitle tracks and languages,etc "
 	Write-Log "".PadRight(30) -NoNewLine
