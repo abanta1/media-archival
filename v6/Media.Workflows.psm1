@@ -249,8 +249,16 @@ function New-SubtitleMuxPlan {
         $cl = Get-SubtitleClassification -Subtitle $t -AllSubtitles $SubTracks
         if ($cl.Confidence -eq 'Low') { $needsManualReview = $true }
 
-        Write-Log "    [$i] Track $($t.TrackKey): $($t.Language) $($cl.Type)" -Color Cyan
-        
+        $displayType = switch ($cl.Type) {
+            'sdh'            { 'SDH' }
+            'forced'         { 'Forced' }
+            'forced-foreign' { 'Forced' }
+            'foreign'        { 'Standard' }
+            'commentary'     { 'Commentary' }
+            default          { 'Standard' }
+        }
+        Write-Log "    [$i] Track $($t.TrackKey): $($t.Language) $displayType" -Color Cyan
+
         [PSCustomObject]@{
             Track        = $t
             IsoCode      = $t.IsoCode

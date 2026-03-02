@@ -116,15 +116,16 @@ function Invoke-EncodeMode {
         }
 
         # Build Names array aligned with subtitleList order (fallback to proposed name)
+
         $names = @()
         if ($subtitleList) {
-            $keys = $subtitleList.Split(',') | ForEach-Object { $_.Trim() }
+            $keys = $subtitleList.Split(',') | ForEach-Object { [int]$_.Trim() }
             foreach ($k in $keys) {
                 $track = $subtitleTracks | Where-Object { $_.TrackKey -eq $k } | Select-Object -First 1
-                if ($track -and $track.Title) {
-                    $names += $track.Title
-                } elseif ($track -and -not [string]::IsNullOrEmpty($track.Language)) {
-                    $names += (Get-ProposedTrackName $track.Language)
+                $role  = $classifications | Where-Object { $_.TrackKey -eq $k } | Select-Object -First 1
+                if ($track) {
+                    $baseName = Convert-IsoToLanguage $track.IsoCode
+                    $names += if ($role) { "$baseName $($role.NameType)" } else { $baseName }
                 } else { $names += "Unknown" }
             }
         }
@@ -166,6 +167,7 @@ function Invoke-EncodeMode {
         $subArr = if ($sub.SubtitleList -is [string]) { $sub.SubtitleList.Split(',').Trim() } else { @($sub.SubtitleList) }
         $audioLines = $video.AudioSummary -split "`n"
         $max = [Math]::Max($audioLines.Count, $subArr.Count)
+
         for ($i=0; $i -lt $max; $i++) {
             [PSCustomObject]@{
                 Title     = if($i-eq 0){$video.DisplayName}else{""}
@@ -178,7 +180,7 @@ function Invoke-EncodeMode {
                 Default   = if($i-lt $sub.Classifications.Count){$sub.Classifications[$i].Default}else{""}
                 Burn      = if($i-lt $subArr.Count){$sub.Burn}else{""}
                 Forced    = if($i-lt $sub.Classifications.Count){$sub.Classifications[$i].Forced}else{""}
-                Name      = if($i-lt $subArr.Count -and $sub.Names -is [array]){"$($sub.Names[$i]) $(if($i -lt $sub.Classifications.Count){$sub.Classifications[$i].NameType})"}else{""}
+                Name      = if($i -lt $subArr.Count -and $sub.Names -is [array]){$sub.Names[$i]}else{""}
             }
         }
     }
@@ -311,6 +313,12 @@ function Invoke-EncodeMode {
     Write-Log "Encoded: $completed/$($FullEncodingPlan.Count) videos" -Color Green
     Write-Log "========================================" -Color Green
     $host.ui.RawUI.WindowTitle = "Windows PowerShell"
+catch { $e = $_.Exception
+    Write-Log "  CRITICAL ERROR scanning $($vid.Name) - skipping" -Color Red
+    Write-Host "$e"
+    Write-Host "Line: $($_.InvocationInfo.ScriptLineNumber) in $($_.InvocationInfo.ScriptName)"
+    continue
+}
 }
 
 function Invoke-SubReviewMode {

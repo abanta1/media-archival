@@ -109,8 +109,8 @@ function Get-RawMetadata {
     }
     
     if ($hbJson -and $hbJson.TitleList) {
-        $hbAudioTracks = @($hbJson.TitleList.AudioList)
-        $hbSubTracks = @($hbJson.TitleList.SubtitleList)
+        $hbAudioTracks = @($hbJson.TitleList.AudioList | Where-Object { $_ -ne $null })
+        $hbSubTracks = @($hbJson.TitleList.SubtitleList | Where-Object { $_ -ne $null })
     } else {
         $hbAudioTracks = @()
         $hbSubTracks = @()
@@ -142,9 +142,9 @@ function Get-RawMetadata {
             $packets = ($packetLine -split '=')[1].Trim()
             
             $ffPacketInfo += [PSCustomObject]@{
-                Index = [int]$index
+                Index = if ($index -and $index -ne 'N/A') { [int]$index } else { 0 }
                 CodecType = $codec
-                PacketCount = [int]$packets
+                PacketCount = if ($packets -and $packets -ne 'N/A') { [int]$packets } else { 0 }
                 TrackKey = 0
             }
         }
@@ -165,8 +165,8 @@ function Get-RawMetadata {
             Width = ($ffJson.streams | Where-Object { $_.codec_type -eq "video" } | Select-Object -First 1 | ForEach-Object { $_.width })
             Height = ($ffJson.streams | Where-Object { $_.codec_type -eq "video" } | Select-Object -First 1 | ForEach-Object { $_.height })
         }
-        $ffAudioTracks = @($ffJson.streams | Where-Object codec_type -eq "audio")
-        $ffSubTracks = @($ffJson.streams | Where-Object { $_.codec_type -eq "subtitle" })
+        $ffAudioTracks = @($ffJson.streams | Where-Object { $_.codec_type -eq "audio" } | Where-Object { $_ -ne $null })
+        $ffSubTracks = @($ffJson.streams | Where-Object { $_.codec_type -eq "subtitle" } | Where-Object { $_ -ne $null })
     } else {
         Write-Log "   WARNING: ffprobe path not set or invalid, skipping" -Color Yellow
         $ffJson = $null
@@ -196,8 +196,8 @@ function Get-RawMetadata {
             Width = ($mkvJson.tracks | Where-Object { $_.type -eq "video" } | Select-Object -First 1 | ForEach-Object { $_.properties.pixel_dimensions }) -split 'x' | Select-Object -First 1
             Height = ($mkvJson.tracks | Where-Object { $_.type -eq "video" } | Select-Object -First 1 | ForEach-Object { $_.properties.pixel_dimensions }) -split 'x' | Select-Object -Last 1
         }
-        $mkvJAudioTracks = @($mkvJson.tracks | Where-Object { $_.type -eq "audio" })
-        $mkvJSubTracks = @($mkvJson.tracks | Where-Object { $_.type -eq "subtitles" })
+        $mkvJAudioTracks = @($mkvJson.tracks | Where-Object { $_.type -eq "audio" } | Where-Object { $_ -ne $null })
+        $mkvJSubTracks = @($mkvJson.tracks | Where-Object { $_.type -eq "subtitles" } | Where-Object { $_ -ne $null })
 
         # Assign Track Key for MKV-J
         for ($i = 0; $i -lt $mkvJAudioTracks.Count; $i++) {
@@ -256,8 +256,8 @@ function Get-RawMetadata {
             Height = $miJson.media.track | Where-Object { $_.'@type' -eq "Video" } | Select-Object -First 1 | ForEach-Object { $_.Height }
         }
 
-        $miAudioTracks = @($miJson.media.track | Where-Object { $_.'@type' -eq "Audio" })
-        $miSubTracks = @($miJson.media.track | Where-Object { $_.'@type' -eq "Text" })
+        $miAudioTracks = @($miJson.media.track | Where-Object { $_.'@type' -eq "Audio" } | Where-Object { $_ -ne $null })
+        $miSubTracks = @($miJson.media.track | Where-Object { $_.'@type' -eq "Text" } | Where-Object { $_ -ne $null })
     } else {
         Write-Log "   WARNING: MediaInfo path not set or invalid, skipping" -Color Yellow
     }
@@ -409,7 +409,7 @@ function Merge-AudioMetadata {
 
         $normFfAudio += [PSCustomObject]@{
             IsAD = if ($null -ne $track.disposition.visual_impaired) { [bool]$track.disposition.visual_impaired } else { $false }
-            BitRate = if ($track.bit_rate) { [int]$track.bit_rate } else { 0 }
+            BitRate = if ($track.bit_rate -and $track.bit_rate -ne 'N/A') { [int]$track.bit_rate } else { 0 }
             Channels = Convert-ChannelCount $track.Channels
             Codec = $tCodec
             IsCommentary = ($track.disposition.comment) -or ($track.tags.title -match '(?i)commentary|director|producer|behind the scenes')
@@ -498,7 +498,7 @@ function Merge-AudioMetadata {
 
         $normMiAudio += [PSCustomObject]@{
             IsAD = $false # MediaInfo doesn't provide AD info
-            Bitrate = if ($track.BitRate) { [int]$track.BitRate } else { 0 }
+            Bitrate = if ($track.BitRate -and $track.BitRate -ne 'N/A') { [int]$track.BitRate } else { 0 }
             Channels = Convert-ChannelCount $track.Channels
             Codec = $tCodec
             IsCommentary = ($track.Title -match '(?i)commentary|director|producer|behind the scenes')
@@ -763,11 +763,11 @@ function Merge-SubtitleMetadata {
 
             $fc = 0
             if ($track.properties.tag_number_of_frames) {
-                $fc = [int]$track.properties.tag_number_of_frames
+                $fc = if ($track.properties.tag_number_of_frames -and $track.properties.tag_number_of_frames -ne 'N/A') { [int]$track.properties.tag_number_of_frames } else { 0 }
             } elseif ($track.properties.number_of_frames) {
-                $fc = [int]$track.properties.number_of_frames
+                $fc = if ($track.properties.tag_number_of_frames -and $track.properties.tag_number_of_frames -ne 'N/A') { [int]$track.properties.tag_number_of_frames } else { 0 }
             } elseif ($track.properties.num_index_entries) {
-                $fc = [int]$track.properties.num_index_entries
+                $fc = if ($track.properties.tag_number_of_frames -and $track.properties.tag_number_of_frames -ne 'N/A') { [int]$track.properties.tag_number_of_frames } else { 0 }
             }
 
             $tsType = Convert-SubCodecType $track.codec
@@ -849,13 +849,13 @@ function Merge-SubtitleMetadata {
                 TrackKey = $track.TrackKey
                 IsoCode = $iso
                 Language = $tlang
-                FrameCount = if ($track.ElementCount) { [int]$track.ElementCount } else { 0 }
+                FrameCount = if ($track.ElementCount -and $track.ElementCount -ne 'N/A') { [int]$track.ElementCount } else { 0 }
                 Forced = $track.Forced -eq 'Yes'
                 Default = $track.Default -eq 'Yes' 
                 Title = $track.Title
                 Format = $track.Format
                 CodecID = $track.CodecID
-                StreamSize = if ($track.StreamSize) { [int]$track.StreamSize } else { 0 }
+                StreamSize = if ($track.StreamSize -and $track.StreamSize -ne 'N/A') { [int]$track.StreamSize } else { 0 }
                 IsSDH = $false # MediaInfo doesn't provide SDH info
                 IsText = $tIsText
                 IsBitmap = -not $tIsText
@@ -1132,7 +1132,7 @@ function Get-QualityScore {
     param([string]$codec)
     if (-not $codec -or $null -eq $codec -or $codec -eq 0 -or $codec -eq "") { return 0 }
     
-    $quality = switch -Regex ($format) {
+    $quality = switch -Regex ($codec) {
              '(?i)TrueHD|FLAC|LPCM|pcm_s16le|pcm_s24le'      { 100 }
              '(?i)DTS-HD MA|DTS-MA|Master Audio'              { 95  }
              '(?i)DTS-HD(?!\s*MA)'                           { 65  }

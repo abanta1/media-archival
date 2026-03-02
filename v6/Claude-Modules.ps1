@@ -18,7 +18,8 @@ $moduleName = @(
 	"Media.Normalize.psm1",
 	"Media.Metadata.psm1",
 	"Media.Workflows.psm1",
-	"Media.Process.psm1"
+	"Media.Process.psm1",
+	"Media.Planning.psm1"
 )
 
 foreach ($module in $moduleName){
