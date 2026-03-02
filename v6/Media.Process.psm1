@@ -241,8 +241,8 @@ function Invoke-EncodeMode {
             "$DstDir$($vid.VideoObject.Directory.Name)"
 			#"$($vid.VideoObject.PSDrive.Root)Encoded\$($vid.VideoObject.Directory.Name)"
         }
-        $garbageDir = $GbgDir
 		#$garbageDir = "$($vid.VideoObject.PSDrive.Root)Garbage\$($vid.VideoObject.Directory.Name)"
+        $garbageDir = Join-Path $GbgDir $vid.VideoObject.Directory.Name
         $outputFile = "$encodedDir\$($vid.DisplayName)$($vid.Extension)"
 
         if (-not (Test-Path $encodedDir)) { Write-Log "  Creating: $encodedDir" -Color Yellow; New-Item $encodedDir -ItemType Directory | Out-Null }
@@ -300,7 +300,7 @@ function Invoke-EncodeMode {
 
         if (-not $success){ continue }
 
-        Move-Item $vid.VideoObject.FullName "$garbageDir\$($vid.VideoObject.Name).old"
+        Move-Item $vid.VideoObject.FullName "$garbageFileDir\$($vid.VideoObject.Name).old"
 
         if ((Get-Item $vid.VideoObject.DirectoryName).GetFileSystemInfos().Count -eq 0) { Remove-Item $vid.VideoObject.DirectoryName }
         $completed++
@@ -313,12 +313,13 @@ function Invoke-EncodeMode {
     Write-Log "Encoded: $completed/$($FullEncodingPlan.Count) videos" -Color Green
     Write-Log "========================================" -Color Green
     $host.ui.RawUI.WindowTitle = "Windows PowerShell"
-catch { $e = $_.Exception
-    Write-Log "  CRITICAL ERROR scanning $($vid.Name) - skipping" -Color Red
-    Write-Host "$e"
-    Write-Host "Line: $($_.InvocationInfo.ScriptLineNumber) in $($_.InvocationInfo.ScriptName)"
-    continue
-}
+
+    catch { $e = $_.Exception
+        Write-Log "  CRITICAL ERROR scanning $($vid.Name) - skipping" -Color Red
+        Write-Host "$e"
+        Write-Host "Line: $($_.InvocationInfo.ScriptLineNumber) in $($_.InvocationInfo.ScriptName)"
+        continue
+    }
 }
 
 function Invoke-SubReviewMode {
