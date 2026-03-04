@@ -559,6 +559,7 @@ while ($true) {
             }
             Write-Host "Title #$($cut.Index) | $($cut.Minutes) min | $($cut.Resolution)" -ForegroundColor DarkGray
             Write-Host "Encoding dir:  $encodingDir" -ForegroundColor DarkGray
+            Write-Host "Encoding filename:  $encodingName.mkv" -ForegroundColor DarkGray
 
             $fullPath = Join-Path $BaseOutputDir $encodingDir
 			$escapedFullPath = [WildcardPattern]::Escape($fullPath)
@@ -576,7 +577,7 @@ while ($true) {
             }
 
             Write-Host "Starting rip of title $($cut.Index)..." -ForegroundColor Cyan
-			Write-Host "Encoding Name [$encodingName], Full Path [$fullpath], Index [$($cut.Index)]"
+            
             $exitCode = Invoke-MakeMKVRip -EncodingName $encodingName -FullPath $fullPath -TitleIndex $cut.Index -DriveIndex $driveIndex
 
             if ($exitCode -eq 0) {
