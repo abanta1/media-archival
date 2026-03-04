@@ -383,7 +383,7 @@ while ($true) {
             (New-Object -ComObject Shell.Application).Namespace(17).ParseName("$Drive").InvokeVerb("Eject")
             continue
         } else {
-            Write-Host "Title detected: $($metadata.Title)" -ForegroundColor Yellow
+            Write-Host "Title detected: $($metadata.Title)" -ForegroundColor Green
             $timeout = 30
             $timer = [Diagnostics.Stopwatch]::new()         
             $timer.Start()
@@ -577,7 +577,7 @@ while ($true) {
             }
 
             Write-Host "Starting rip of title $($cut.Index)..." -ForegroundColor Cyan
-            
+
             $exitCode = Invoke-MakeMKVRip -EncodingName $encodingName -FullPath $fullPath -TitleIndex $cut.Index -DriveIndex $driveIndex
 
             if ($exitCode -eq 0) {
