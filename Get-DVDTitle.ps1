@@ -236,12 +236,13 @@ function Invoke-MakeMKVRip {
     param(
         [string]$EncodingName,
         [string]$FullPath,
-        [int]$TitleIndex       # -1 = rip all
+        [int]$TitleIndex,      # -1 = rip all
+        [int]$DriveIndex
     )
 
     $exePath   = "C:\Program Files (x86)\MakeMKV\makemkvcon64.exe"
     $titleArg  = if ($TitleIndex -ge 0) { $TitleIndex } else { "all" }
-    $arguments = "-r --progress=-stdout mkv --noscan --minlength=900 disc:$driveIndex $titleArg `"$FullPath`""
+    $arguments = "-r --progress=-stdout mkv --noscan --minlength=900 disc:$DriveIndex $titleArg `"$FullPath`""
 
     $psi                        = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName               = $exePath
@@ -376,7 +377,24 @@ while ($true) {
             Write-Host "Same disc as last rip ($lastTitle) - insert a new disc." -ForegroundColor Yellow
             (New-Object -ComObject Shell.Application).Namespace(17).ParseName("$Drive").InvokeVerb("Eject")
             continue
-        }
+        } else {
+            Write-Host "Title detected: $($metadata.Title)" -ForegroundColor Yellow
+            $timeout = 30
+            $timer = [Diagnostics.Stopwatch]::StartNew()         
+
+            while ($timer.Elapsed.Seconds -lt $timeout -and -not $Host.UI.RawUI.KeyAvailable) {
+                Write-Host "Do you wish to edit? (Y/[N]) $($timeout - $timer.Elapsed.Seconds)`r" -NoNewLine -ForegroundColor White
+                Start-Sleep -Milliseconds 500
+            }
+            $key = $null
+            if ($Host.UI.RawUI.KeyAvailable) {
+                $key = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown").Character
+            }
+            if ($key -match '(?i)y'){
+                Write-Host "Enter new title: " -NoNewLine
+                $metadata.Title = Read-Host
+            }
+	    }
 
         Write-Host "Detected Disc Name: " -NoNewLine -ForegroundColor White
         Write-Host "$($metadata.Title)" -ForegroundColor Cyan
@@ -535,17 +553,17 @@ while ($true) {
 				exit
 			}
             if (-not (Test-Path -LiteralPath $fullPath)) {
-                New-Item -Path $escapedFullPath -ItemType Directory -Force | Out-Null
+                New-Item -Path $fullPath -ItemType Directory -Force | Out-Null
             } elseif ((Get-Item -LiteralPath $fullPath).GetFileSystemInfos().Count -ne 0) {
                 Write-Host "Directory already exists and contains files - ensure it is empty before ripping." -ForegroundColor Yellow
                 Pause
-                if (-not (Test-Path -LiteralPath $fullPath)) { New-Item -Path $escapedFullPath -ItemType Directory -Force | Out-Null }
+                if (-not (Test-Path -LiteralPath $fullPath)) { New-Item -Path $fullPath -ItemType Directory -Force | Out-Null }
                 Write-Host "Continuing..."
             }
 
             Write-Host "Starting rip of title $($cut.Index)..." -ForegroundColor Cyan
 			Write-Host "Encoding Name [$encodingName], Full Path [$fullpath], Index [$($cut.Index)]"
-            $exitCode = Invoke-MakeMKVRip -EncodingName $encodingName -FullPath $fullPath -TitleIndex $cut.Index
+            $exitCode = Invoke-MakeMKVRip -EncodingName $encodingName -FullPath $fullPath -TitleIndex $cut.Index -DriveIndex $driveIndex
 
             if ($exitCode -eq 0) {
                 Write-Host "Rip Complete: $encodingName" -ForegroundColor Green
