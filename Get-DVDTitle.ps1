@@ -10,6 +10,7 @@ param(
     [string]$TmdbKey = $env:TMDB_API
 )
 
+[Console]::TreatControlCAsInput = $false
 [Console]::InputEncoding  = [System.Text.Encoding]::UTF8
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 if (-not $PSDefaultParameterValues) { $PSDefaultParameterValues = @{} }
@@ -18,6 +19,9 @@ $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
 $BaseOutputDir = "G:/makemkvcon"
 $fileInfo = Get-Item -Path $PSCommandPath
 $version = ": $($fileInfo.LastWriteTime.ToShortDateString()) - $($fileInfo.LastWriteTime.ToShortTimeString())"
+# $MyInvocation.ScriptLineNumber
+# Write-Host $MyInvocation.ScriptLineNumber -ForegroundColor Blue
+
 
 if ([string]::IsNullOrEmpty($TmdbKey)) {
     $TmdbKey = Get-Secret -Name TMDB_API -AsPlainText
@@ -65,28 +69,28 @@ function Get-DiscMetadata {
 	$ifoPath = Join-Path $Drive "VIDEO_TS\VIDEO_TS.IFO"
 	$bdmvPath = Join-Path $Drive "BDMV\index.bdmv"
 	
-	for ($i = 1; $i -le 40; $i++){
-		$ready = $false
-		
-		if (Test-Path $ifoPath) {
-			try {
-				$s = [System.IO.File]::Open($ifoPath, 'Open', 'Read', 'Read')
-				$s.Close()
-				$ready = $true
-			} catch {}
-		}
-		
-		if (Test-Path $bdmvPath) {
-			try {
-				$s = [System.IO.File]::Open($bdmvPath, 'Open', 'Read', 'Read')
-				$s.Close()
-				$ready = $true
-			} catch {}
-		}
-		
-		if ($ready) { break }
-		Start-Sleep -Milliseconds 500
-	}
+	$ready      = $false
+    $maxRetries = 40
+    $retries    = 0
+
+    while (-not $ready -and $retries -lt $maxRetries) {
+        if (Test-Path $ifoPath) {
+            try { $s = [IO.File]::Open($ifoPath, 'Open', 'Read', 'Read'); $s.Close(); $ready = $true } catch {}
+        }
+        if (Test-Path $bdmvPath) {
+            try { $s = [IO.File]::Open($bdmvPath, 'Open', 'Read', 'Read'); $s.Close(); $ready = $true } catch {}
+        }
+        if (-not $ready) { 
+            $retries++
+            Write-Host "  Waiting for disc filesystem... ($($retries * 0.5)s)" -ForegroundColor DarkGray
+            Start-Sleep -Milliseconds 500
+        }
+    }
+
+    if (-not $ready) {
+        Write-Host "Disc filesystem not ready after $($maxRetries * 0.5)s - aborting" -ForegroundColor Red
+        return $null
+    }
 	
 	$mkOut = & "C:\Program Files (x86)\MakeMKV\makemkvcon64.exe" -r info disc:$DriveIndex
 	
@@ -140,17 +144,33 @@ function Get-DiscMetadata {
 
     $mainFeatures = @($allTitles | Where-Object { [math]::Abs($_.Minutes - $allTitles[0].Minutes) -le $variance })
     $extras       = @($allTitles | Where-Object { [math]::Abs($_.Minutes - $allTitles[0].Minutes) -gt $variance })
+	
+	$dupThreshold = 5
+	$distinctCuts = @()
+	$assigned	  = @{}
 
     foreach ($feature in $mainFeatures) {
-        Write-Host "Feature #$($feature.Index): $($feature.Minutes) minutes @ $($feature.Resolution)" -ForegroundColor White
-    }
+        if ($assigned[$feature.Index]) { continue }
+		
+		$group = @($mainFeatures | Where-Object {
+			-not $assigned[$_.Index] -and [math]::Abs($_.Minutes - $feature.Minutes) -le $dupThreshold
+		})
+		
+		$representative = $group | Sort-Object Minutes -Descending | Select-Object -First 1
+		foreach ($g in $group) { $assigned[$g.Index] = $true }
+		
+		$distinctCuts += $representative
+	}
+	
+	$distinctCuts = @($distinctCuts | Sort-Object Minutes)
 
     return @{
-        Title    = $cleanTitle
-        Features = $mainFeatures
-        Extras   = $extras
-        Height   = if ($mainFeatures.Count -gt 0) { $mainFeatures[0].Height } else { 0 }
-        Width    = if ($mainFeatures.Count -gt 0) { $mainFeatures[0].Width  } else { 0 }
+        Title    	 = $cleanTitle
+        Features 	 = $mainFeatures
+        Extras   	 = $extras
+		DistinctCuts = $distinctCuts
+        Height   	 = if ($mainFeatures.Count -gt 0) { $mainFeatures[0].Height } else { 0 }
+        Width    	 = if ($mainFeatures.Count -gt 0) { $mainFeatures[0].Width  } else { 0 }
     }
 }
 
@@ -182,29 +202,35 @@ function Search-MovieMatch {
 
     if (-not $Title) { return $null }
 
-    $encodedTitle  = [uri]::EscapeDataString($Title)
-    $queryURL      = "https://api.themoviedb.org/3/search/movie?api_key=$ApiKey&query=$encodedTitle"
-    Write-Host "Querying TMDB at $queryURL" -ForegroundColor DarkGray
-    $queryResults  = (Invoke-RestMethod -Uri $queryURL).results
+    $encodedTitle = [uri]::EscapeDataString($Title)
+    $queryURL     = "https://api.themoviedb.org/3/search/movie?api_key=$ApiKey&query=$encodedTitle"
 
+    # Cache the search results by title
+    if (-not $script:tmdbCache.ContainsKey($encodedTitle)) {
+        Write-Host "Querying TMDB at $queryURL" -ForegroundColor DarkGray
+        $script:tmdbCache[$encodedTitle] = (Invoke-RestMethod -Uri $queryURL).results
+    }
+
+    $queryResults = $script:tmdbCache[$encodedTitle]
     if (-not $queryResults) { return $null }
 
     $topResults = $queryResults | Select-Object -First 5
 
     foreach ($video in $topResults) {
-        $detailsURL     = "https://api.themoviedb.org/3/movie/$($video.id)?api_key=$ApiKey"
-        $detailsResults = Invoke-RestMethod -Uri $detailsURL
-
-        $diff = [math]::Abs($Runtime - $detailsResults.runtime)
-        if ($diff -le 2) {
-            return [PSCustomObject]@{ Video = $detailsResults; NeedsReview = $false; Method = "Runtime Match" }
-        } elseif ($diff -le 10) {
-            return [PSCustomObject]@{ Video = $detailsResults; NeedsReview = $true;  Method = "Runtime within 10m" }
+        # Cache detail lookups by movie ID
+        if (-not $script:tmdbCache.ContainsKey($video.id)) {
+            $script:tmdbCache[$video.id] = Invoke-RestMethod -Uri "https://api.themoviedb.org/3/movie/$($video.id)?api_key=$ApiKey"
         }
+        $details = $script:tmdbCache[$video.id]
+
+        $diff = [math]::Abs($Runtime - $details.runtime)
+        if ($diff -le 2)  { return [PSCustomObject]@{ Video = $details; NeedsReview = $false; Method = "Runtime Match"      } }
+        if ($diff -le 10) { return [PSCustomObject]@{ Video = $details; NeedsReview = $true;  Method = "Runtime within 10m" } }
     }
 
     return [PSCustomObject]@{ Video = $topResults[0]; NeedsReview = $true; Method = "Popularity Fallback" }
 }
+
 
 function Invoke-MakeMKVRip {
     param(
@@ -279,44 +305,40 @@ function Move-RippedFiles {
         [string]$EncodingDir
     )
 
-    $vids = Get-ChildItem -Recurse $FullPath
+    $vids = Get-ChildItem -LiteralPath $FullPath -Filter *.mkv
+    if (-not $vids) { Write-Host "No MKV files found in $FullPath" -ForegroundColor Yellow; return }
+
     foreach ($vid in $vids) {
-        if ($vid.Name -match '(.*)(_t\d{2})\.mkv$') {
-            $ripExt = $Matches[2]
-        } else {
-            continue
-        }
+        if ($vid.Name -notmatch '(.*)(_t\d{2})\.mkv$') { continue }
+        $ripExt  = $Matches[2]
+        $newName = "$EncodingName$ripExt.mkv"
+        $destDir = "G:\Redbox\$EncodingDir"
+        $newPath = Join-Path $vid.DirectoryName $newName
+        $destFile = Join-Path $destDir $newName
 
         Write-Host "Auto-naming and moving $($vid.Name)..." -ForegroundColor DarkGray
-        $newName = "$EncodingName$ripExt.mkv"
-        $newPath = Join-Path $vid.DirectoryName $newName
-        $destDir = "G:\Redbox\$EncodingDir"
+
+        if (-not (Test-Path $destDir)) { New-Item -Path $destDir -ItemType Directory -Force | Out-Null }
 
         Rename-Item -Path $vid.FullName -NewName $newName
-        Start-Sleep -Milliseconds 500
 
-        if (-not (Test-Path $destDir)) {
-            New-Item -Path $destDir -Type Directory -Force | Out-Null
-            Start-Sleep -Milliseconds 500
+        # Retry loop instead of blind sleeps
+        $moved = $false
+        for ($i = 1; $i -le 10; $i++) {
+            if (Test-Path $newPath) { Move-Item -Path $newPath -Destination $destDir; $moved = $true; break }
+            Start-Sleep -Milliseconds 200
         }
 
-        Move-Item -Path $newPath -Destination $destDir
-        Start-Sleep -Milliseconds 500
+        if (-not $moved) { Write-Host "Failed to move $newName after retries" -ForegroundColor Red; continue }
 
-        $destFile = Join-Path $destDir $newName
         if (Test-Path $destFile) {
             Write-Host "$newName successfully moved!" -ForegroundColor Green
-            # Remove _t00 suffix for the primary title
             if ($destFile -match '_t00\.mkv$') {
                 Rename-Item -Path $destFile -NewName ($newName -replace $ripExt, '')
             }
         } else {
-            Write-Host "Unable to find file in $destDir" -ForegroundColor Yellow
+            Write-Host "Unable to find $newName in $destDir" -ForegroundColor Yellow
         }
-    }
-
-    if ((Get-Item $FullPath).GetFileSystemInfos().Count -eq 0) {
-        Remove-Item $FullPath -Force
     }
 }
 
@@ -325,6 +347,7 @@ function Move-RippedFiles {
 # ================================
 $host.ui.RawUI.WindowTitle = "Get-DVDTitle $version"
 
+$dupThreshold = 5
 $driveIndex = Get-DriveIndex -Drive $Drive
 
 while ($true) {
@@ -358,32 +381,8 @@ while ($true) {
         Write-Host "Detected Disc Name: " -NoNewLine -ForegroundColor White
         Write-Host "$($metadata.Title)" -ForegroundColor Cyan
 
-        $features = $metadata.Features
-
-        # ---- Group features into distinct cuts (within 5 min = same cut, keep longest) ----
-        # Features are already sorted longest-first from Get-DiscMetadata
-        $dupThreshold  = 5
-        $distinctCuts  = @()
-        $assigned      = @{}
-
-        foreach ($feature in $features) {
-            if ($assigned[$feature.Index]) { continue }
-
-            # Find all features within 5 min of this one (duplicates of the same cut)
-            $group = @($features | Where-Object {
-                -not $assigned[$_.Index] -and [math]::Abs($_.Minutes - $feature.Minutes) -le $dupThreshold
-            })
-
-            # Keep the longest (first, since sorted descending) as the representative
-            $representative = $group | Sort-Object Minutes -Descending | Select-Object -First 1
-            foreach ($g in $group) { $assigned[$g.Index] = $true }
-
-            $distinctCuts += $representative
-        }
-
-        # Sort cuts longest-first so theatrical (shorter) ends up after extended (longer)
-        # Then re-sort: shortest first = theatrical first, extended second
-        $distinctCuts = @($distinctCuts | Sort-Object Minutes)
+        $features 	  = $metadata.Features
+		$distinctCuts = $metadata.DistinctCuts
 
         Write-Host ""
         Write-Host "Detected $($distinctCuts.Count) distinct cut(s):" -ForegroundColor Cyan
@@ -391,30 +390,78 @@ while ($true) {
             Write-Host "  Title #$($cut.Index): $($cut.Minutes) min @ $($cut.Resolution)" -ForegroundColor White
         }
 
-        # ---- TMDB lookup per distinct cut ----
-        $methodPriority = @{ "Runtime Match" = 0; "Runtime within 10m" = 1; "Popularity Fallback" = 2 }
-        $matchedCuts    = @()
+        # ---- TMDB lookup per distinct cut (parallel via RunspacePool) ----
+		$methodPriority = @{ "Runtime Match" = 0; "Runtime within 10m" = 1; "Popularity Fallback" = 2 }
+		$matchedCuts    = @()
 
-        foreach ($cut in $distinctCuts) {
-            Write-Host ""
-            Write-Host "Searching TMDB for cut #$($cut.Index) ($($cut.Minutes) min)..." -ForegroundColor DarkGray
-            $match = Search-MovieMatch -Title $metadata.Title -Runtime $cut.Minutes -ApiKey $TmdbKey
+		$poolSize = [math]::Min($distinctCuts.Count, 4)
+		$pool     = [RunspaceFactory]::CreateRunspacePool(1, $poolSize)
+		$pool.Open()
 
-            if ($match) {
-                $matchedCuts += [PSCustomObject]@{ Cut = $cut; Match = $match }
-                $yr = if ($match.Video.release_date -match '(\d{4})') { $Matches[1] } else { "" }
-                Write-Host "  -> $($match.Video.title) ($yr) via $($match.Method)" -ForegroundColor $(if ($match.NeedsReview) { "Yellow" } else { "Green" })
-            } else {
-                # No match at all - still rip, flag for review
-                Write-Host "  -> No TMDB match found - will rip and flag for review" -ForegroundColor Yellow
-                $matchedCuts += [PSCustomObject]@{ Cut = $cut; Match = $null }
-            }
-        }
+		$scriptBlock = {
+			param($cut, $title, $apiKey)
 
-        # Determine which cut is theatrical vs extended:
-        # The cut with the best TMDB runtime match is theatrical.
-        # Any cut longer than theatrical by >5 min is Extended.
-        # Sort by match quality to find theatrical anchor.
+			$encodedTitle = [uri]::EscapeDataString($title)
+			$queryURL     = "https://api.themoviedb.org/3/search/movie?api_key=$apiKey&query=$encodedTitle"
+			$queryResults = (Invoke-RestMethod -Uri $queryURL).results
+
+			if (-not $queryResults) { return [PSCustomObject]@{ Cut = $cut; Match = $null } }
+
+			$topResults = $queryResults | Select-Object -First 5
+
+			foreach ($video in $topResults) {
+				$detailsURL     = "https://api.themoviedb.org/3/movie/$($video.id)?api_key=$apiKey"
+				$detailsResults = Invoke-RestMethod -Uri $detailsURL
+				$diff = [math]::Abs($cut.Minutes - $detailsResults.runtime)
+				if ($diff -le 2)  { return [PSCustomObject]@{ Cut = $cut; Match = [PSCustomObject]@{ Video = $detailsResults; NeedsReview = $false; Method = "Runtime Match"      } } }
+				if ($diff -le 10) { return [PSCustomObject]@{ Cut = $cut; Match = [PSCustomObject]@{ Video = $detailsResults; NeedsReview = $true;  Method = "Runtime within 10m" } } }
+			}
+
+			return [PSCustomObject]@{ Cut = $cut; Match = [PSCustomObject]@{ Video = $topResults[0]; NeedsReview = $true; Method = "Popularity Fallback" } }
+		}
+
+		# Kick off all runspaces
+		$handles = foreach ($cut in $distinctCuts) {
+			Write-Host "Queuing TMDB lookup for cut #$($cut.Index) ($($cut.Minutes) min)..." -ForegroundColor DarkGray
+			$rs              = [PowerShell]::Create()
+			$rs.RunspacePool = $pool
+			$null            = $rs.AddScript($scriptBlock).AddArgument($cut).AddArgument($metadata.Title).AddArgument($TmdbKey)
+			[PSCustomObject]@{ RS = $rs; Handle = $rs.BeginInvoke() }
+		}
+
+		# Collect results
+		foreach ($h in $handles) {
+			$result = $h.RS.EndInvoke($h.Handle)[0]
+			$h.RS.Dispose()
+			
+			if (-not $result) { continue }
+
+			$cut   = $result.Cut
+			$match = $result.Match
+
+			if ($match) {
+				$yr = if ($match.Video.release_date -match '(\d{4})') { $Matches[1] } else { "" }
+				Write-Host "  Cut #$($cut.Index): $($match.Video.title) ($yr) via $($match.Method)" -ForegroundColor $(if ($match.NeedsReview) { "Yellow" } else { "Green" })
+			} else {
+				Write-Host "  Cut #$($cut.Index): No TMDB match found - will rip and flag for review" -ForegroundColor Yellow
+			}
+
+			$matchedCuts += [PSCustomObject]@{ Cut = $cut; Match = $match }
+		}
+
+		$pool.Close()
+		$pool.Dispose()
+
+		# Re-sort to match original cut order
+		if ($matchedCuts.Count -eq 0) {
+            Write-Host "No cuts matched - ejecting disc" -ForegroundColor Yellow
+            (New-Object -ComObject Shell.Application).Namespace(17).ParseName("$Drive").InvokeVerb("Eject")
+            continue
+        } elseif ($matchedCuts.Count -gt 0) {
+			$matchedCuts = $matchedCuts | Sort-Object { $_.Cut.Index }
+		}
+		
+		# Determine theatrical vs extended
         $theatricalCut = $matchedCuts |
             Where-Object { $_.Match -ne $null } |
             Sort-Object { $methodPriority[$_.Match.Method] } |
@@ -422,24 +469,14 @@ while ($true) {
 
         $theatricalMinutes = if ($theatricalCut) { $theatricalCut.Cut.Minutes } else { ($matchedCuts | Sort-Object { $_.Cut.Minutes } | Select-Object -First 1).Cut.Minutes }
 
-        # Label each cut
         foreach ($mc in $matchedCuts) {
             $mc | Add-Member -MemberType NoteProperty -Name "IsExtended" -Value ($mc.Cut.Minutes -gt ($theatricalMinutes + $dupThreshold))
         }
 
-        if ($matchedCuts.Count -eq 0) {
-            Write-Warning "No cuts to process. Skipping disc."
-            (New-Object -ComObject Shell.Application).Namespace(17).ParseName("$Drive").InvokeVerb("Eject")
-            Start-Sleep -Milliseconds 500
-            continue
-        }
-
-        # ---- Rip each distinct cut ----
         foreach ($mc in $matchedCuts) {
             $cut   = $mc.Cut
             $match = $mc.Match
 
-            # If no TMDB match, use disc title and flag for review
             if ($null -eq $match) {
                 $cleanTitle   = $metadata.Title -replace '[:\\/*?"<>|]', ''
                 $imdbId       = "unknown"
@@ -467,10 +504,9 @@ while ($true) {
 
             $extendedSuffix = if ($mc.IsExtended) { " - {edition:Extended}" } else { "" }
             $reviewSuffix   = if ($needsReview)    { " [NeedsReview]" } else { "" }
-
             $yearPart        = if ($videoYear) { " ($videoYear)" } else { "" }
             $qualityPart     = if ($quality)   { " - $quality" }   else { "" }
-            $encodingDir     = "$cleanTitle$yearPart$extendedSuffix {imdb-$imdbId}$reviewSuffix"
+            $encodingDir     = "$cleanTitle$yearPart {imdb-$imdbId}$reviewSuffix"
             $encodingName    = "$cleanTitle$yearPart$extendedSuffix$qualityPart"
 
             $nRColor = if ($needsReview) { "Yellow" } else { "DarkGray" }
@@ -493,17 +529,21 @@ while ($true) {
             Write-Host "Encoding dir:  $encodingDir" -ForegroundColor DarkGray
 
             $fullPath = Join-Path $BaseOutputDir $encodingDir
-            if (-not (Test-Path $fullPath)) {
-                New-Item -Path $fullPath -ItemType Directory -Force | Out-Null
-            } elseif ((Get-Item $fullPath).GetFileSystemInfos().Count -ne 0) {
+			if ($null -eq $fullPath) {
+				Write-Host "Error with encoding directory" -ForegroundColor Red
+				exit
+			}
+            if (-not (Test-Path -LiteralPath $fullPath)) {
+                New-Item -LiteralPath $fullPath -ItemType Directory -Force | Out-Null
+            } elseif ((Get-Item -LiteralPath $fullPath).GetFileSystemInfos().Count -ne 0) {
                 Write-Host "Directory already exists and contains files - ensure it is empty before ripping." -ForegroundColor Yellow
                 Pause
-                if (-not (Test-Path $fullPath)) { New-Item -Path $fullPath -ItemType Directory -Force | Out-Null }
+                if (-not (Test-Path -LiteralPath $fullPath)) { New-Item -LiteralPath $fullPath -ItemType Directory -Force | Out-Null }
                 Write-Host "Continuing..."
             }
 
-            # Always rip by specific title index since we've identified distinct cuts
             Write-Host "Starting rip of title $($cut.Index)..." -ForegroundColor Cyan
+			Write-Host "Encoding Name [$encodingName], Full Path [$fullpath], Index [$($cut.Index)]"
             $exitCode = Invoke-MakeMKVRip -EncodingName $encodingName -FullPath $fullPath -TitleIndex $cut.Index
 
             if ($exitCode -eq 0) {
@@ -514,15 +554,20 @@ while ($true) {
                 Write-Warning "MakeMKV exited with code $exitCode for title $($cut.Index)"
             }
         }
+			
+		if ((Get-Item -LiteralPath $fullPath).GetFileSystemInfos().Count -eq 0) {
+			Remove-Item -LiteralPath $fullPath -Force
+		}
 
         $lastTitle = $metadata.Title
         Write-Host "All features processed. Ejecting disc..." -ForegroundColor Cyan
         (New-Object -ComObject Shell.Application).Namespace(17).ParseName("$Drive").InvokeVerb("Eject")
 		Start-Sleep -Milliseconds 5000
-    }
-    catch {
+    } catch {
         Write-Error "Script failed: $($_.Exception.Message)"
-    }
+    } finally {
+		if ($pool) { $pool.Close(); $pool.Dispose() }
+	}
 }
 
 $host.ui.RawUI.WindowTitle = "Windows Powershell"
