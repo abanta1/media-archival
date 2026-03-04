@@ -3,36 +3,93 @@
 # ================================
 
 param(
-    [Parameter(Mandatory=$false)]
-    [string]$Drive = "D:",   # Example: "D:\VIDEO_TS"
+    [Parameter(Mandatory=$true)]
+    [string]$Drive,
 
     [Parameter(Mandatory=$false)]
     [string]$TmdbKey = $env:TMDB_API
 )
 
+[Console]::InputEncoding  = [System.Text.Encoding]::UTF8
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+if (-not $PSDefaultParameterValues) { $PSDefaultParameterValues = @{} }
+$PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
+
+$BaseOutputDir = "G:/makemkvcon"
+$fileInfo = Get-Item -Path $PSCommandPath
+$version = ": $($fileInfo.LastWriteTime.ToShortDateString()) - $($fileInfo.LastWriteTime.ToShortTimeString())"
+
 if ([string]::IsNullOrEmpty($TmdbKey)) {
     $TmdbKey = Get-Secret -Name TMDB_API -AsPlainText
 }
 
-$fileInfo = Get-Item -Path $PSCommandPath
-$version = ": $($fileInfo.LastWriteTime.ToShortDateString()) - $($fileInfo.LastWriteTime.ToShortTimeString())"
-
-$driveIndex = switch ($Drive[0]) {
-	'D'		{ 0 }
-	'H'		{ 1 }
-	'F'		{ 2 }
-	default { 9999 }
+if ($Drive -match '(?i)[a-z]\:'){
+	$driveLetter = $Drive[0]
+	$Drive = "$($driveLetter):"
+} else {
+	$Drive = "$($Drive):"
+	$driveLetter = $Drive[0]
 }
 
-Write-Host "Drive is $Drive, index is $driveIndex" -ForegroundColor White
-$BaseOutputDir = "G:/makemkvcon"
-
+function Get-DriveIndex {
+	param([string]$Drive)
+	
+	Write-Host "Obtaining drive index..." -ForegroundColor Cyan
+	
+	$mkDriveScan = & "C:\Program Files (x86)\MakeMKV\makemkvcon64.exe" -r info disc:9999
+	
+	foreach ($line in $mkDriveScan) {
+		if ($line -match "^DRV:(\d+),(\d+),(\d+),(\d+),\`".*\`",\`".*\`",\`"($($Drive))\`"$") {
+			$driveIndex = $Matches[1]
+			$driveLetter = $Matches[5]
+			
+			if ($Drive -eq $driveLetter) {
+				$newDriveIndex = $driveIndex
+			}
+			
+			$driveLetter = $Matches[5][0]
+		}
+	}
+	
+	Write-Host "Drive is $Drive, drive letter is $driveLetter, index is $newDriveIndex" -ForegroundColor White
+	
+	return $newDriveIndex
+}
 
 function Get-DiscMetadata {
-    param([string]$DriveLetter)
-
-    $mkOut = & "C:\Program Files (x86)\MakeMKV\makemkvcon64.exe" -r info disc:$driveIndex
-
+    param(
+		[string]$DriveLetter,
+		[string]$DriveIndex
+	)
+	
+	$ifoPath = Join-Path $Drive "VIDEO_TS\VIDEO_TS.IFO"
+	$bdmvPath = Join-Path $Drive "BDMV\index.bdmv"
+	
+	for ($i = 1; $i -le 40; $i++){
+		$ready = $false
+		
+		if (Test-Path $ifoPath) {
+			try {
+				$s = [System.IO.File]::Open($ifoPath, 'Open', 'Read', 'Read')
+				$s.Close()
+				$ready = $true
+			} catch {}
+		}
+		
+		if (Test-Path $bdmvPath) {
+			try {
+				$s = [System.IO.File]::Open($bdmvPath, 'Open', 'Read', 'Read')
+				$s.Close()
+				$ready = $true
+			} catch {}
+		}
+		
+		if ($ready) { break }
+		Start-Sleep -Milliseconds 500
+	}
+	
+	$mkOut = & "C:\Program Files (x86)\MakeMKV\makemkvcon64.exe" -r info disc:$DriveIndex
+	
     if (-not ($mkOut -match "CINFO:")) {
         Write-Host "MakeMKV unable to detect info, returning null" -ForegroundColor Red
         return $null
@@ -97,7 +154,6 @@ function Get-DiscMetadata {
     }
 }
 
-
 function Out-WrapText {
     param(
         [Parameter(Mandatory)]
@@ -120,7 +176,6 @@ function Out-WrapText {
     if ($line.Trim().Length -gt 0) { $out.Add($line.TrimEnd()) }
     return $out -join [Environment]::NewLine
 }
-
 
 function Search-MovieMatch {
     param($Title, $Runtime, $ApiKey)
@@ -150,7 +205,6 @@ function Search-MovieMatch {
 
     return [PSCustomObject]@{ Video = $topResults[0]; NeedsReview = $true; Method = "Popularity Fallback" }
 }
-
 
 function Invoke-MakeMKVRip {
     param(
@@ -218,7 +272,6 @@ function Invoke-MakeMKVRip {
     return $process.ExitCode
 }
 
-
 function Move-RippedFiles {
     param(
         [string]$FullPath,
@@ -267,11 +320,12 @@ function Move-RippedFiles {
     }
 }
 
-
 # ================================
 # Execution
 # ================================
 $host.ui.RawUI.WindowTitle = "Get-DVDTitle $version"
+
+$driveIndex = Get-DriveIndex -Drive $Drive
 
 while ($true) {
     try {
@@ -288,7 +342,8 @@ while ($true) {
 
         Write-Host "`rDisc detected, starting rip..." -ForegroundColor Cyan
         Write-Host "Reading disc metadata via MakeMKV..." -ForegroundColor Cyan
-        $metadata = Get-DiscMetadata -DriveLetter $Drive
+		
+        $metadata = Get-DiscMetadata -DriveLetter $Drive -DriveIndex $driveIndex
 
         if (-not $metadata) {
             Write-Error "Failed to read disc metadata. Verify if clean and re-insert"
@@ -454,6 +509,7 @@ while ($true) {
             if ($exitCode -eq 0) {
                 Write-Host "Rip Complete: $encodingName" -ForegroundColor Green
                 Move-RippedFiles -FullPath $fullPath -EncodingName $encodingName -EncodingDir $encodingDir
+                Start-Sleep -Milliseconds 5000
             } else {
                 Write-Warning "MakeMKV exited with code $exitCode for title $($cut.Index)"
             }
