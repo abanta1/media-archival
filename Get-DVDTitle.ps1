@@ -529,16 +529,17 @@ while ($true) {
             Write-Host "Encoding dir:  $encodingDir" -ForegroundColor DarkGray
 
             $fullPath = Join-Path $BaseOutputDir $encodingDir
+			$escapedFullPath = [WildcardPattern]::Escape($fullPath)
 			if ($null -eq $fullPath) {
 				Write-Host "Error with encoding directory" -ForegroundColor Red
 				exit
 			}
             if (-not (Test-Path -LiteralPath $fullPath)) {
-                New-Item -LiteralPath $fullPath -ItemType Directory -Force | Out-Null
+                New-Item -Path $escapedFullPath -ItemType Directory -Force | Out-Null
             } elseif ((Get-Item -LiteralPath $fullPath).GetFileSystemInfos().Count -ne 0) {
                 Write-Host "Directory already exists and contains files - ensure it is empty before ripping." -ForegroundColor Yellow
                 Pause
-                if (-not (Test-Path -LiteralPath $fullPath)) { New-Item -LiteralPath $fullPath -ItemType Directory -Force | Out-Null }
+                if (-not (Test-Path -LiteralPath $fullPath)) { New-Item -Path $escapedFullPath -ItemType Directory -Force | Out-Null }
                 Write-Host "Continuing..."
             }
 
