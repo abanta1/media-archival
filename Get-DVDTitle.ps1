@@ -72,6 +72,7 @@ function Get-DiscMetadata {
 	$ready      = $false
     $maxRetries = 40
     $retries    = 0
+    $dots       = 0
 
     while (-not $ready -and $retries -lt $maxRetries) {
         if (Test-Path $ifoPath) {
@@ -82,7 +83,11 @@ function Get-DiscMetadata {
         }
         if (-not $ready) { 
             $retries++
-            Write-Host "  Waiting for disc filesystem... ($($retries * 0.5)s)" -ForegroundColor DarkGray
+            #Write-Host "  Waiting for disc filesystem... ($($retries * 0.5)s)   `r" -ForegroundColor DarkGray
+            $ellipsis = "." * $dots
+            $pad      = " " * (3 - $dots)
+            Write-Host "`rWaiting for disc filesystem $ellipsis$pad" -NoNewLine -ForegroundColor DarkGray
+            $dots = ($dots + 1) % 4
             Start-Sleep -Milliseconds 500
         }
     }
@@ -380,20 +385,29 @@ while ($true) {
         } else {
             Write-Host "Title detected: $($metadata.Title)" -ForegroundColor Yellow
             $timeout = 30
-            $timer = [Diagnostics.Stopwatch]::StartNew()         
-
-            while ($timer.Elapsed.Seconds -lt $timeout -and -not $Host.UI.RawUI.KeyAvailable) {
-                Write-Host "Do you wish to edit? (Y/[N]) $($timeout - $timer.Elapsed.Seconds)`r" -NoNewLine -ForegroundColor White
+            $timer = [Diagnostics.Stopwatch]::new()         
+            $timer.Start()
+            
+            while ($timer.Elapsed.Seconds -lt $timeout -and -not [Console]::KeyAvailable) {
+                Write-Host "Press [Enter] if you wish to edit, any other key to continue - $($timeout - $timer.Elapsed.Seconds)s `r" -NoNewLine -ForegroundColor White
                 Start-Sleep -Milliseconds 500
             }
+
+            $timer.Stop()
             $key = $null
-            if ($Host.UI.RawUI.KeyAvailable) {
-                $key = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown").Character
-            }
-            if ($key -match '(?i)y'){
-                Write-Host "Enter new title: " -NoNewLine
+            
+            try { 
+                if ([Console]::KeyAvailable){
+                    $key = [Console]::ReadKey($true)
+                }                
+            } catch {}
+            
+            if ($key.Key -match 'Enter'){
+                Write-Host "`nEnter new title: " -NoNewLine
                 $metadata.Title = Read-Host
             }
+            
+            Write-Host "`n ".PadRight(35)
 	    }
 
         Write-Host "Detected Disc Name: " -NoNewLine -ForegroundColor White
