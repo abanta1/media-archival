@@ -407,7 +407,7 @@ while ($true) {
                 $metadata.Title = Read-Host
             }
             
-            Write-Host "`n ".PadRight(35)
+            Write-Host "`n ".PadRight(70)
 	    }
 
         Write-Host "Detected Disc Name: " -NoNewLine -ForegroundColor White
