@@ -324,23 +324,23 @@ function Move-RippedFiles {
 
         Write-Host "Auto-naming and moving $($vid.Name)..." -ForegroundColor DarkGray
 
-        if (-not (Test-Path $destDir)) { New-Item -Path $destDir -ItemType Directory -Force | Out-Null }
+        if (-not (Test-Path -LiteralPath  $destDir)) { New-Item -Path $destDir -ItemType Directory -Force | Out-Null }
 
-        Rename-Item -Path $vid.FullName -NewName $newName
+        Rename-Item -LiteralPath $vid.FullName -NewName $newName
 
         # Retry loop instead of blind sleeps
         $moved = $false
         for ($i = 1; $i -le 10; $i++) {
-            if (Test-Path $newPath) { Move-Item -Path $newPath -Destination $destDir; $moved = $true; break }
+            if (Test-Path -LiteralPath $newPath) { Move-Item -LiteralPath $newPath -Destination $destDir; $moved = $true; break }
             Start-Sleep -Milliseconds 200
         }
 
         if (-not $moved) { Write-Host "Failed to move $newName after retries" -ForegroundColor Red; continue }
 
-        if (Test-Path $destFile) {
+        if (Test-Path -LiteralPath  $destFile) {
             Write-Host "$newName successfully moved!" -ForegroundColor Green
             if ($destFile -match '_t00\.mkv$') {
-                Rename-Item -Path $destFile -NewName ($newName -replace $ripExt, '')
+                Rename-Item -LiteralPath $destFile -NewName ($newName -replace $ripExt, '')
             }
         } else {
             Write-Host "Unable to find $newName in $destDir" -ForegroundColor Yellow
@@ -519,7 +519,7 @@ while ($true) {
             } else {
                 $vid          = $match.Video
                 $cleanTitle   = $vid.title -replace '[:\\/*?"<>|]', ''
-                $imdbId       = $vid.imdb_id
+                $imdbId       = if ($vid.imdb_id) { $vid.imdb_id } else { "unknown" }
                 $videoYear    = if ($vid.release_date -match '(\d{4})') { $Matches[1] } else { "" }
                 $needsReview  = $match.NeedsReview
                 $matchMethod  = $match.Method
@@ -575,8 +575,12 @@ while ($true) {
                 if (-not (Test-Path -LiteralPath $fullPath)) { New-Item -Path $fullPath -ItemType Directory -Force | Out-Null }
                 Write-Host "Continuing..."
             }
-
-            Write-Host "Starting rip of title $($cut.Index)..." -ForegroundColor Cyan
+			
+			if ($matchedCuts.Count -gt 1) {
+				Write-Host "Starting rip of title $($cut.Index)..." -ForegroundColor Cyan
+			} else {
+				Write-Host "Starting rip..." -ForegroundColor Cyan
+			}
 
             $exitCode = Invoke-MakeMKVRip -EncodingName $encodingName -FullPath $fullPath -TitleIndex $cut.Index -DriveIndex $driveIndex
 
