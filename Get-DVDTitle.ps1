@@ -379,36 +379,41 @@ while ($true) {
             (New-Object -ComObject Shell.Application).Namespace(17).ParseName("$Drive").InvokeVerb("Eject")
             continue
         } elseif ($metadata.Title -eq $lastTitle) {
-            Write-Host "Same disc as last rip ($lastTitle) - insert a new disc." -ForegroundColor Yellow
-            (New-Object -ComObject Shell.Application).Namespace(17).ParseName("$Drive").InvokeVerb("Eject")
-            continue
-        } else {
-            Write-Host "Title detected: $($metadata.Title)" -ForegroundColor Green
-            $timeout = 30
-            $timer = [Diagnostics.Stopwatch]::new()         
-            $timer.Start()
-            
-            while ($timer.Elapsed.Seconds -lt $timeout -and -not [Console]::KeyAvailable) {
-                Write-Host "Press [Enter] if you wish to edit, any other key to continue - $($timeout - $timer.Elapsed.Seconds)s `r" -NoNewLine -ForegroundColor White
-                Start-Sleep -Milliseconds 500
-            }
+			Write-Host "This is the same disc as the last rip: ($lastTitle). Are you sure you want to re-rip? (Y/[N]): " -ForegroundColor Yellow -NoNewLine
+			$reRipAns = Read-Host
+			if ($reRipAns -notmatch '(?i)y') {
+				Write-Host "Ejecting disc... - insert a new disc." -ForegroundColor Yellow
+				(New-Object -ComObject Shell.Application).Namespace(17).ParseName("$Drive").InvokeVerb("Eject")
+				Start-Sleep -Seconds 5
+				continue
+			}
+        }
+		
+		Write-Host "Title detected: $($metadata.Title)" -ForegroundColor Green
+		$timeout = 30
+		$timer = [Diagnostics.Stopwatch]::new()         
+		$timer.Start()
+		
+		while ($timer.Elapsed.Seconds -lt $timeout -and -not [Console]::KeyAvailable) {
+			Write-Host "Press [Enter] if you wish to edit, any other key to continue - $($timeout - $timer.Elapsed.Seconds)s `r" -NoNewLine -ForegroundColor White
+			Start-Sleep -Milliseconds 500
+		}
 
-            $timer.Stop()
-            $key = $null
-            
-            try { 
-                if ([Console]::KeyAvailable){
-                    $key = [Console]::ReadKey($true)
-                }                
-            } catch {}
-            
-            if ($key.Key -match 'Enter'){
-                Write-Host "`nEnter new title: " -NoNewLine
-                $metadata.Title = Read-Host
-            }
-            
-            Write-Host "`n ".PadRight(70)
-	    }
+		$timer.Stop()
+		$key = $null
+		
+		try { 
+			if ([Console]::KeyAvailable){
+				$key = [Console]::ReadKey($true)
+			}                
+		} catch {}
+		
+		if ($key.Key -match 'Enter'){
+			Write-Host "`nEnter new title: " -NoNewLine
+			$metadata.Title = Read-Host
+		}
+		
+		Write-Host "`n ".PadRight(70)
 
         Write-Host "Detected Disc Name: " -NoNewLine -ForegroundColor White
         Write-Host "$($metadata.Title)" -ForegroundColor Cyan

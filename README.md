@@ -33,8 +33,6 @@ The scripts assume a Windows environment with the following installed:
 
 ```powershell
 # prompt will attempt to read TMDB_API from environment or secret vault
-.
-```powershell
 Get-DVDTitle.ps1 -Drive "D:" -TmdbKey "<your‑api‑key>"
 ```
 
