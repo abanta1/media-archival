@@ -3,6 +3,15 @@
 A collection of PowerShell scripts and modules used to rip, encode, and manage a personal media archive.  The repository has grown over several major revisions as new workflows and helper functions were developed.  Scripts range from one‑off utilities for grabbing disc metadata to general purpose modules that drive long‑running encoding pipelines.
 
 ---
+## 🧭 Guiding Principles
+- Facts over assumptions. Every decision the pipeline makes is grounded in measurable data — acoustic analysis (LRA, RMS, spectral flatness), element counts, codec metadata, and multi-tool consensus. If the data is ambiguous, the system says so rather than guessing.
+- Multi-tool consensus over single-source trust. No single tool (HandBrake, ffprobe, mkvmerge, MediaInfo) is treated as authoritative. Each provides a vote, conflicts are resolved by weighted scoring, and confidence levels are tracked and surfaced to the user.
+- Confidence is a first-class value. Every classification carries a confidence level — High, Medium, or Low. Low confidence doesn't mean failure; it means the decision is escalated to the user rather than made automatically.
+- Type safety at the boundary. Raw data from external tools is strings. Conversion to numeric types happens once, at ingestion, in normalized form. Downstream code never casts — it compares.
+- Separation of concerns across tiers. I/O, normalization, metadata merging, workflow decisions, planning, and orchestration are distinct layers. Each layer takes clean input from the layer below and returns clean output to the layer above. No layer reaches across boundaries.
+- Acoustic science over heuristics. Where possible, signal processing metrics replace guesswork. Loudness range, center channel energy, and spectral flatness are objective measurements — track titles and codec names are not.
+- The encode plan is inspectable and editable. No file is touched until the user has reviewed and confirmed the full plan. Automation accelerates the workflow; humans remain in control of the outcome.
+
 
 ## 📁 Repository Structure
 
