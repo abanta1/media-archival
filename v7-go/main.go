@@ -11,6 +11,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"golang.org/x/sys/windows"
 )
 
 // Global Config (PS1 param block)
@@ -92,6 +94,16 @@ func main() {
 	setupCloseHandler()
 
 	fmt.Println("Starting MakeMKV Go-Auto...")
+	handle, err := openDriveHandle(cfg.DriveLetter)
+	if err != nil {
+		debugLog("Failed to open drive handle: %v", err)
+	} else {
+		lockDrive(handle)
+		defer func() {
+			unlockDrive(handle)
+			windows.CloseHandle(handle)
+		}()
+	}
 
 	// 2. Main Exec Loop
 	for {
@@ -103,6 +115,7 @@ func main() {
 		}
 
 		fmt.Println("\nDisc detected! Starting workflow...")
+		lockDrive(handle)
 
 		driveIndex, _ := GetDriveIndex(cfg.DriveLetter, cfg.MakeMKVPath)
 		fmt.Println("Drive Index: " + driveIndex)
@@ -171,6 +184,7 @@ func main() {
 				MoveAndRename(fullTempPath, encNewName, encodingDir, cfg.DestPath)
 			}
 
+			unlockDrive(handle)
 			ejectDrive(cfg.DriveLetter)
 		}
 	}

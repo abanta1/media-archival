@@ -9,11 +9,13 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
 
 const IOCTL_STORAGE_EJECT_MEDIA = 0x2D4808
+const IOCTL_STORAGE_MEDIA_REMOVAL = 0x002D4804
 
 func InvokeMakeMKVRip(name string, args []string, exePath string) {
 	cmd := exec.Command(exePath, args...)
@@ -65,6 +67,55 @@ func runMetadataScan(index string, exePath string) DiscInfo {
 
 	cmd.Process.Kill()
 	return info
+}
+
+func lockDrive(handle windows.Handle) error {
+	var bytesReturned uint32
+	pmr := uint32(1) // 1 = prevent removal/lock
+	return windows.DeviceIoControl(
+		handle,
+		IOCTL_STORAGE_MEDIA_REMOVAL,
+		(*byte)(unsafe.Pointer(&pmr)),
+		uint32(unsafe.Sizeof(pmr)),
+		nil, 0,
+		&bytesReturned,
+		nil,
+	)
+}
+
+func unlockDrive(handle windows.Handle) error {
+	var bytesReturned uint32
+	pmr := uint32(0) // 0 = allow removal/lock
+	return windows.DeviceIoControl(
+		handle,
+		IOCTL_STORAGE_MEDIA_REMOVAL,
+		(*byte)(unsafe.Pointer(&pmr)),
+		uint32(unsafe.Sizeof(pmr)),
+		nil, 0,
+		&bytesReturned,
+		nil,
+	)
+}
+
+func openDriveHandle(driveLetter string) (windows.Handle, error) {
+	drivePath := `\\.\` + strings.TrimSuffix(driveLetter, "\\")
+	path, err := windows.UTF16PtrFromString(drivePath)
+	if err != nil {
+		return windows.InvalidHandle, err
+	}
+	handle, err := windows.CreateFile(
+		path,
+		windows.GENERIC_READ|windows.GENERIC_WRITE,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE,
+		nil,
+		windows.OPEN_EXISTING,
+		0,
+		0,
+	)
+	if err != nil {
+		return windows.InvalidHandle, err
+	}
+	return handle, nil
 }
 
 func ejectDrive(letter string) {
