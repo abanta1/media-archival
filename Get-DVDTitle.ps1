@@ -5,6 +5,9 @@
 param(
     [Parameter(Mandatory=$true)]
     [string]$Drive,
+	
+	[Parameter(Mandatory=$true)]
+	[string]$DestinationDir,
 
     [Parameter(Mandatory=$false)]
     [string]$TmdbKey = $env:TMDB_API
@@ -16,12 +19,24 @@ param(
 if (-not $PSDefaultParameterValues) { $PSDefaultParameterValues = @{} }
 $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
 
-$BaseOutputDir = "G:/makemkvcon"
+if ($DestinationDir){
+	if (-not (Test-Path -LiteralPath $DestinationDir)){
+		New-Item -Path $DestinationDir -ItemType Directory -Force | Out-Null
+	}
+	$BaseOutputDir = $DestinationDir
+} else {
+	$BaseOutputDir = "G:/makemkvcon"
+}
+
 $fileInfo = Get-Item -Path $PSCommandPath
 $version = ": $($fileInfo.LastWriteTime.ToShortDateString()) - $($fileInfo.LastWriteTime.ToShortTimeString())"
-# $MyInvocation.ScriptLineNumber
-# Write-Host $MyInvocation.ScriptLineNumber -ForegroundColor Blue
 
+$originalPath = $env:Path
+
+
+if (Get-Command java -ErrorAction SilentlyContinue) {
+	$env:PATH = ($env:PATH -split ';' | Where-Object { $_ -notmatch 'java|jre|jdk' }) -join ';'
+}
 
 if ([string]::IsNullOrEmpty($TmdbKey)) {
     $TmdbKey = Get-Secret -Name TMDB_API -AsPlainText
@@ -296,12 +311,20 @@ function Invoke-MakeMKVRip {
             $title = $Matches[1]
         } elseif ($line -match '^PRGC:\d+,\d+,"(.*)"$') {
             $step = $Matches[1]
-        }
+        } elseif ($line -match '(\d+) titles saved, (\d+) failed') {
+			$savedCount = [int]$Matches[1]
+			$failedCount = [int]$Matches[2]
+		}
     }
 
     $process.WaitForExit()
     Write-Progress -Activity "Ripping: $EncodingName" -Completed
-    return $process.ExitCode
+	
+	return [PSCustomObject]@{
+		ExitCode = $process.ExitCode
+		Saved    = $savedCount
+		Failed   = $failedCount
+	}
 }
 
 function Move-RippedFiles {
@@ -318,7 +341,8 @@ function Move-RippedFiles {
         if ($vid.Name -notmatch '(.*)(_t\d{2})\.mkv$') { continue }
         $ripExt  = $Matches[2]
         $newName = "$EncodingName$ripExt.mkv"
-        $destDir = "G:\Redbox\$EncodingDir"
+        #$destDir = "G:\Redbox\$EncodingDir"
+		$destDir = Join-Path $BaseOutputDir $EncodingDir
         $newPath = Join-Path $vid.DirectoryName $newName
         $destFile = Join-Path $destDir $newName
 
@@ -391,6 +415,7 @@ while ($true) {
 		
 		Write-Host "Title detected: $($metadata.Title)" -ForegroundColor Green
 		$timeout = 30
+		while ([Console]::KeyAvailable) { $null = [Console]::ReadKey($true) }
 		$timer = [Diagnostics.Stopwatch]::new()         
 		$timer.Start()
 		
@@ -539,7 +564,7 @@ while ($true) {
                 default        { ""      }
             }
 
-            $extendedSuffix = if ($mc.IsExtended) { " - {edition:Extended}" } else { "" }
+            $extendedSuffix = if ($mc.IsExtended) { " - {edition-Extended}" } else { "" }
             $reviewSuffix   = if ($needsReview)    { " [NeedsReview]" } else { "" }
             $yearPart        = if ($videoYear) { " ($videoYear)" } else { "" }
             $qualityPart     = if ($quality)   { " - $quality" }   else { "" }
@@ -587,14 +612,24 @@ while ($true) {
 				Write-Host "Starting rip..." -ForegroundColor Cyan
 			}
 
-            $exitCode = Invoke-MakeMKVRip -EncodingName $encodingName -FullPath $fullPath -TitleIndex $cut.Index -DriveIndex $driveIndex
-
-            if ($exitCode -eq 0) {
-                Write-Host "Rip Complete: $encodingName" -ForegroundColor Green
+            #$exitCode = Invoke-MakeMKVRip -EncodingName $encodingName -FullPath $fullPath -TitleIndex $cut.Index -DriveIndex $driveIndex
+			$result = Invoke-MakeMKVRip -EncodingName $encodingName -FullPath $fullPath -TitleIndex $cut.Index -DriveIndex $driveIndex
+			
+			if ($result.ExitCode -eq 0 -and $result.Failed -eq 0 -and $result.Saved -gt 0){
+				Write-Host "Rip Complete: $encodingName" -ForegroundColor Green
                 Move-RippedFiles -FullPath $fullPath -EncodingName $encodingName -EncodingDir $encodingDir
                 Start-Sleep -Milliseconds 5000
-            } else {
-                Write-Warning "MakeMKV exited with code $exitCode for title $($cut.Index)"
+			} elseif ($result.ExitCode -eq 0 -and ($result.Saved -gt 0 -and $result.Failed -gt 0)) {
+				Write-Host "Rip Finished: $encodingName" -ForegroundColor Yellow
+				Write-Host "$($result.Saved) successful, $($result.Failed) failed"
+				Move-RippedFiles -FullPath $fullPath -EncodingName $encodingName -EncodingDir $encodingDir
+                Pause
+			} elseif ($result.ExitCode -eq 0 -and ($result.Saved -eq 0 -or $result.Failed -ne 0)) {
+				Write-Host "Rip Failed: $encodingName" -ForegroundColor Red
+				Write-Host "$($result.Failed) title(s) failed"
+                Pause
+			} else {
+                Write-Warning "MakeMKV exited with code $($result.ExitCode) for title $($cut.Index)"
             }
         }
 			
@@ -613,6 +648,7 @@ while ($true) {
 	}
 }
 
+$env:Path = $originalPath
 $host.ui.RawUI.WindowTitle = "Windows Powershell"
 
 <# 
