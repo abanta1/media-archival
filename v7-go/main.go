@@ -11,6 +11,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 	"golang.org/x/term"
@@ -18,19 +19,30 @@ import (
 
 // Global Config (PS1 param block)
 var (
-	TmdbKey   = os.Getenv("TMDB_API")
-	debugMode bool
+	TmdbKey         = os.Getenv("TMDB_API")
+	debugMode       bool
+	kernel32        = syscall.NewLazyDLL("kernel32.dll")
+	setTitle        = kernel32.NewProc("SetConsoleTitleW")
+	procSetTitle    = kernel32.NewProc("SetConsoleTitleW")
+	procGetConsMode = kernel32.NewProc("GetConsoleMode")
+	procSetConsMode = kernel32.NewProc("SetConsoleMode")
 )
 
 func enableANSI() {
-	stdout := windows.Handle(os.Stdout.Fd())
+	stdout := os.Stdout.Fd()
 	var mode uint32
-	windows.GetConsoleMode(stdout, &mode)
-	windows.SetConsoleMode(stdout, mode|0x0004) // ENABLE_VIRTUAL_TERMINAL_PROCESSING
+	procGetConsMode.Call(stdout, uintptr(unsafe.Pointer(&mode)))
+	procSetConsMode.Call(stdout, uintptr(mode|0x0004))
+}
+
+func setConsoleTitle(title string) {
+	ptr, _ := windows.UTF16PtrFromString(title)
+	procSetTitle.Call(uintptr(unsafe.Pointer(ptr)))
 }
 
 func main() {
 	enableANSI()
+	setConsoleTitle("MakeMKV Go-Auto")
 
 	configPath := flag.String("config", "config.json", "")
 	flag.StringVar(configPath, "C", "config.json", "")
@@ -104,16 +116,25 @@ func main() {
 	setupCloseHandler()
 
 	fmt.Println("Starting MakeMKV Go-Auto...")
-	handle, err := openDriveHandle(cfg.DriveLetter)
+	/*
+		handle, err := openDriveHandle(cfg.DriveLetter)
+		if err != nil {
+			debugLog("Failed to open drive handle: %v", err)
+		} else {
+			lockDrive(handle)
+			defer func() {
+				unlockDrive(handle)
+				windows.CloseHandle(handle)
+			}()
+		}
+	*/
+
+	server, err := NewMKVServer(cfg.MakeMKVPath)
 	if err != nil {
-		debugLog("Failed to open drive handle: %v", err)
-	} else {
-		lockDrive(handle)
-		defer func() {
-			unlockDrive(handle)
-			windows.CloseHandle(handle)
-		}()
+		fmt.Fprintf(os.Stderr, "Failed to start MKV server: %v\n", err)
+		os.Exit(1)
 	}
+	defer server.Close()
 
 	// 2. Main Exec Loop
 	for {
@@ -125,13 +146,36 @@ func main() {
 		}
 
 		fmt.Println("\nDisc detected! Starting workflow...")
-		lockDrive(handle)
+		//lockDrive(handle)
 
-		driveIndex, _ := GetDriveIndex(cfg.DriveLetter, cfg.MakeMKVPath)
-		fmt.Println("Drive Index: " + driveIndex)
+		server.UpdateDrives()
+
+		debugLog("Looking for drive: %q", cfg.DriveLetter)
+		for i, d := range server.Drives {
+			debugLog("Drive[%d]: state=%d device=%q label=%q", i, d.State, d.Device, d.Label)
+		}
+
+		driveIndex := -1
+		for _, d := range server.Drives {
+			if strings.Contains(strings.ToUpper(d.Device), strings.ToUpper(cfg.DriveLetter)) && d.State == AP_DriveStateInserted {
+				driveIndex = d.Index
+				break
+			}
+		}
+		if driveIndex == -1 {
+			fmt.Println("Disc not found in drive", cfg.DriveLetter)
+			continue
+		}
+
+		fmt.Printf("Drive Index: %d\n", driveIndex)
+		debugLog("Drive Index: %d\n", driveIndex)
 
 		fmt.Println("Scanning Disc Info...")
-		info := runMetadataScan(driveIndex, cfg.MakeMKVPath)
+
+		info := runMetadataScan(fmt.Sprintf("%d", driveIndex), cfg.MakeMKVPath)
+
+		//unlockDrive(handle)
+		//windows.CloseHandle(handle)
 
 		if info.Title != "" {
 			// Allow user to edit disc title before TMDB search
@@ -156,10 +200,11 @@ func main() {
 				fmt.Println()
 				if key == 13 {
 					fmt.Print("Enter new title: ")
-					var newTitle string
-					fmt.Scanln(&newTitle)
-					if strings.TrimSpace(newTitle) != "" {
-						info.Title = strings.TrimSpace(newTitle)
+					reader := bufio.NewReader(os.Stdin)
+					newTitle, _ := reader.ReadString('\n')
+					newTitle = strings.TrimSpace(newTitle)
+					if newTitle != "" {
+						info.Title = newTitle
 					}
 				}
 			case <-time.After(30 * time.Second):
@@ -202,7 +247,7 @@ func main() {
 					"mkv",
 					"--noscan",
 					"--minlength=900",
-					"disc:" + driveIndex,
+					"disc:" + fmt.Sprintf("%d", driveIndex),
 					fmt.Sprintf("%d", cut.Index),
 					fullTempPath,
 				}
@@ -226,7 +271,7 @@ func main() {
 				MoveAndRename(fullTempPath, encNewName, encodingDir, cfg.DestPath)
 			}
 
-			unlockDrive(handle)
+			//unlockDrive(handle)
 			ejectDrive(cfg.DriveLetter)
 		}
 	}

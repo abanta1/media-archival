@@ -29,6 +29,14 @@ type DiscInfo struct {
 	Matches      []MatchResult
 }
 
+type DriveInfo struct {
+	Index   int
+	State   uint32
+	FsFlags uint32
+	Label   string
+	Device  string
+}
+
 // GroupByMinutes - PS1= [math]::Abs($_.Minutes - $feature.Minutes) -le 5
 func IsDuplicate(m1, m2 int, threshold int) bool {
 	return math.Abs(float64(m1-m2)) <= float64(threshold)
