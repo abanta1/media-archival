@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"golang.org/x/sys/windows"
+	"golang.org/x/term"
 )
 
 // Global Config (PS1 param block)
@@ -21,7 +22,16 @@ var (
 	debugMode bool
 )
 
+func enableANSI() {
+	stdout := windows.Handle(os.Stdout.Fd())
+	var mode uint32
+	windows.GetConsoleMode(stdout, &mode)
+	windows.SetConsoleMode(stdout, mode|0x0004) // ENABLE_VIRTUAL_TERMINAL_PROCESSING
+}
+
 func main() {
+	enableANSI()
+
 	configPath := flag.String("config", "config.json", "")
 	flag.StringVar(configPath, "C", "config.json", "")
 	flag.BoolVar(&debugMode, "debug", false, "")
@@ -124,6 +134,38 @@ func main() {
 		info := runMetadataScan(driveIndex, cfg.MakeMKVPath)
 
 		if info.Title != "" {
+			// Allow user to edit disc title before TMDB search
+			fmt.Printf("Title detected: %s\n", info.Title)
+			fmt.Println("Press Enter to edit, any other key to continue (30s)...")
+
+			keyCh := make(chan byte, 1)
+			go func() {
+				oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
+				if err != nil {
+					keyCh <- 0
+					return
+				}
+				defer term.Restore(int(os.Stdin.Fd()), oldState)
+				var buf [1]byte
+				os.Stdin.Read(buf[:])
+				keyCh <- buf[0]
+			}()
+
+			select {
+			case key := <-keyCh:
+				fmt.Println()
+				if key == 13 {
+					fmt.Print("Enter new title: ")
+					var newTitle string
+					fmt.Scanln(&newTitle)
+					if strings.TrimSpace(newTitle) != "" {
+						info.Title = strings.TrimSpace(newTitle)
+					}
+				}
+			case <-time.After(30 * time.Second):
+				fmt.Println("\nContinuing...")
+			}
+
 			fmt.Println("Processing cuts...")
 			ProcessCuts(&info)
 
