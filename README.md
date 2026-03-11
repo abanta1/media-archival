@@ -2,6 +2,61 @@
 
 A collection of PowerShell scripts and modules used to rip, encode, and manage a personal media archive.  The repository has grown over several major revisions as new workflows and helper functions were developed.  Scripts range from one‑off utilities for grabbing disc metadata to general purpose modules that drive long‑running encoding pipelines.
 
+## 🔧 Core Dependencies
+
+This project relies on several external tools. Most workflows require more than one — make sure you have everything installed that applies to the scripts you intend to use.
+
+---
+
+### 🎬 MakeMKV ⚠️ Proprietary — Please Support the Developers
+
+Required for all **disc inspection and ripping** workflows (`v6`, `Get-DVDTitle.ps1`, and related scripts). Scripts that work purely on already-ripped files do not require MakeMKV, but anything touching a physical disc does.
+
+MakeMKV is **not open source freeware**. It is proprietary software developed and maintained by a small, independent team. If this project is useful to you, please support the developers:
+
+> 💳 **Purchase a license: [https://www.makemkv.com/buy/](https://www.makemkv.com/buy/)**
+
+A purchased license is permanent, covers all platforms, and directly funds continued development of MakeMKV. It is the single best thing you can do to keep this tool alive.
+
+A **free time-limited beta key** is periodically posted on the MakeMKV forum for evaluation:
+> 🔑 [https://forum.makemkv.com/forum/viewtopic.php?t=1053](https://forum.makemkv.com/forum/viewtopic.php?t=1053)
+
+MakeMKV usage is governed by the [MakeMKV End User License Agreement](https://www.makemkv.com/eula.html). The open-source component (`makemkv-oss`) is dual-licensed under GPL-2.0 and MPL-1.1. See the [MakeMKV Linux build instructions](https://forum.makemkv.com/forum/viewtopic.php?f=3&t=224) if you need to compile from source on Linux, or [my github repo](https://github.com/abanta1/makemkv-gui) maintained for convenience and helping spread awareness of the tool.
+
+---
+
+### ✂️ HandBrake
+
+Required for all **encoding workflows** (v6 modules, encode pipeline). Used to transcode ripped titles with fine-grained control over codec, quality, audio tracks, and subtitles.
+
+> 🔗 [https://handbrake.fr/](https://handbrake.fr/) — Free and open source (GPL-2.0)  
+> CLI docs: [https://handbrake.fr/docs/en/latest/cli/cli-options.html](https://handbrake.fr/docs/en/latest/cli/cli-options.html)
+
+---
+
+### 🔊 FFmpeg
+
+Required for **audio analysis, loudness measurement, and codec inspection** throughout the v5 encode workflow. Also used alongside `ffprobe` for track metadata. If building MakeMKV from source on Linux, a recent FFmpeg (≥ 2.0) is needed for 24-bit FLAC, AAC, and DTS-HD support.
+
+> 🔗 [https://ffmpeg.org/](https://ffmpeg.org/) — Free and open source (LGPL-2.1 / GPL-2.0)
+
+---
+
+### 📊 MediaInfo
+
+Required for **codec and container metadata** in the v5 encode workflow. Used alongside ffprobe and mkvmerge as one of the multi-tool consensus sources for track classification.
+
+> 🔗 [https://mediaarea.net/en/MediaInfo](https://mediaarea.net/en/MediaInfo) — Free and open source (BSD-2-Clause)
+
+---
+
+### 🎥 TMDb API
+
+Required for **title matching and metadata lookup** in `Get-DVDTitle.ps1`. A free API key is available by creating an account on The Movie Database.
+
+> 🔗 [https://www.themoviedb.org/](https://www.themoviedb.org/) — Free API key, attribution required  
+> API docs: [https://developer.themoviedb.org/docs](https://developer.themoviedb.org/docs)
+
 ---
 ## 🧭 Guiding Principles
 - Facts over assumptions. Every decision the pipeline makes is grounded in measurable data — acoustic analysis (LRA, RMS, spectral flatness), element counts, codec metadata, and multi-tool consensus. If the data is ambiguous, the system says so rather than guessing.
@@ -18,9 +73,12 @@ A collection of PowerShell scripts and modules used to rip, encode, and manage a
 - `Get-DVDTitle.ps1` – utility for fingerprinting a physical DVD/Blu‑Ray, extracting title information via **MakeMKV**, and searching for a match on **TMDb**, ripping video, and naming based on previous match.
 - `Find-Langs.ps1`, `ReorderAudio.ps1` – miscellaneous helpers used in v4 workflows.
 - `archive/v1/`, `archive/v2/`, `archive/v3/`, `archive/v4/` – historical versions of earlier scripts have been moved into an `archive` directory for clarity. Each sub‑directory holds one or more past iterations.
-- `v5/` – current library modules used by the present workflow:
+- `v5/` – prior library modules used by the present workflow:
   - `Claude-Modules.ps1` – central bootstrap module that imports the rest.
   - `Media.IO.psm1`, `Media.Metadata.psm1`, `Media.Normalize.psm1`, `Media.Process.psm1`, `Media.Workflows.psm1` – modular code for I/O, metadata handling, normalization and processing.
+- `v6/` – current library modules used by the present workflow:
+  - `Claude-Modules.ps1` – central bootstrap module that imports the rest.
+  - `Media.IO.psm1`, `Media.Metadata.psm1`, `Media.Normalize.psm1`, `Media.Planning.psm1`, `Media.Process.psm1`, `Media.Workflows.psm1` – modular code for I/O, metadata handling, normalization and processing.
 
 Other standalone tools (e.g. `Get-DVDTitle.ps1`) can be run directly without importing the modules.
 
@@ -45,10 +103,10 @@ The scripts assume a Windows environment with the following installed:
 Get-DVDTitle.ps1 -Drive "D:" -TmdbKey "<your‑api‑key>"
 ```
 
-### Import and use library modules (v5)
+### Import and use library modules (v6)
 
 ```powershell
-Import-Module .\v5\Claude-Modules.ps1
+Import-Module .\v6\Claude-Modules.ps1
 # then call exported functions such as New-RemuxWithSubtitles, Convert-IsoToLanguage, etc.
 ```
 
