@@ -54,7 +54,7 @@ Required for **codec and container metadata** in the v5 encode workflow. Used al
 
 ### 🎥 TMDb API
 
-Required for **title matching and metadata lookup** in `v7-go` and `Get-DVDTitle.ps1`. A free API key is available by creating an account on The Movie Database.
+Required for **title matching and metadata lookup** in `v5` and `Get-DVDTitle.ps1`. A free API key is available by creating an account on The Movie Database.
 
 > 🔗 [https://www.themoviedb.org/](https://www.themoviedb.org/) — Free API key, attribution required  
 > API docs: [https://developer.themoviedb.org/docs](https://developer.themoviedb.org/docs)
