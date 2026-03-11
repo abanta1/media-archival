@@ -30,11 +30,18 @@ type DiscInfo struct {
 }
 
 type DriveInfo struct {
-	Index   int
-	State   uint32
-	FsFlags uint32
-	Label   string
-	Device  string
+	Index       int
+	State       uint32
+	FsFlags     uint32
+	Label       string
+	Device      string
+	DriveLetter string
+}
+
+type TitleInfo struct {
+	Handle       uint64
+	TrackCount   uint32
+	ChapterCount uint32
 }
 
 // GroupByMinutes - PS1= [math]::Abs($_.Minutes - $feature.Minutes) -le 5

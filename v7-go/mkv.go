@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -51,7 +50,7 @@ func InvokeMakeMKVRip(name string, args []string, exePath string) {
 	fmt.Println("\nRip Complete.")
 }
 
-func runMetadataScan(index string, exePath string) DiscInfo {
+/*func runMetadataScan(index string, exePath string) DiscInfo {
 	// Call makemkvcon to get disc info in robot mode (-r)
 	cmd := exec.Command(exePath, "-r", "info", "disc:"+index)
 	stdout, _ := cmd.StdoutPipe()
@@ -67,35 +66,23 @@ func runMetadataScan(index string, exePath string) DiscInfo {
 
 	cmd.Process.Kill()
 	return info
+}*/
+
+// replaces runMetadataScan
+func (s *MKVServer) OpenDisc(driveIndex int) error {
+	s.mem = APShmem{}
+	s.mem.Args[0] = uint32(driveIndex)
+	s.mem.Args[1] = 0
+	return s.execCmd(apCallOpenCdDisk, 2, 0)
 }
 
-func lockDrive(handle windows.Handle) error {
-	var bytesReturned uint32
-	pmr := uint32(1) // 1 = prevent removal/lock
-	return windows.DeviceIoControl(
-		handle,
-		IOCTL_STORAGE_MEDIA_REMOVAL,
-		(*byte)(unsafe.Pointer(&pmr)),
-		uint32(unsafe.Sizeof(pmr)),
-		nil, 0,
-		&bytesReturned,
-		nil,
-	)
+func (s *MKVServer) GetTitleCount() int {
+	// AP_vastr or title collection info populated after OpenCdDisk
+	// via apBackSetTitleCollInfo callback during execCmd
+	return s.TitleCount
 }
 
-func unlockDrive(handle windows.Handle) error {
-	var bytesReturned uint32
-	pmr := uint32(0) // 0 = allow removal/lock
-	return windows.DeviceIoControl(
-		handle,
-		IOCTL_STORAGE_MEDIA_REMOVAL,
-		(*byte)(unsafe.Pointer(&pmr)),
-		uint32(unsafe.Sizeof(pmr)),
-		nil, 0,
-		&bytesReturned,
-		nil,
-	)
-}
+// replaces runMetadataScan
 
 func openDriveHandle(driveLetter string) (windows.Handle, error) {
 	drivePath := `\\.\` + strings.TrimSuffix(driveLetter, "\\")

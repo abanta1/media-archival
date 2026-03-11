@@ -138,44 +138,103 @@ func main() {
 
 	// 2. Main Exec Loop
 	for {
-		// Wait for disc
+		if server.isDead {
+			fmt.Println("MakeMKV server connection lost. Attempting to restart...")
+			server.Close() // Clean up old process
+			var err error
+			server, err = NewMKVServer(cfg.MakeMKVPath)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to restart MKV server: %v\n", err)
+				os.Exit(1) // Or maybe sleep and retry
+			}
+			fmt.Println("MakeMKV server restarted successfully.")
+		}
+
+		// Wait for disc - BDMV/VIDEO_TS on disc FS
 		dots := []string{".   ", "..  ", "... ", "...."}
+		for i := 0; i < 10; i++ {
+			fmt.Printf("\rDetecting disc filesystem%s", dots[i%4])
+			time.Sleep(500 * time.Millisecond)
+		}
+		fmt.Printf("\rDetecting disc filesystem")
+
 		for i := 0; !discReady(cfg.DriveLetter); i++ {
-			fmt.Printf("\rWaiting for disc%s", dots[i%4])
+			fmt.Printf("\rWaiting for disc%s\033[K", dots[i%4])
 			time.Sleep(500 * time.Millisecond)
 		}
 
-		fmt.Println("\nDisc detected! Starting workflow...")
-		//lockDrive(handle)
+		fmt.Println("\rDetected filesystem on disc - Starting workflow...")
 
-		server.UpdateDrives()
-
-		debugLog("Looking for drive: %q", cfg.DriveLetter)
-		for i, d := range server.Drives {
-			debugLog("Drive[%d]: state=%d device=%q label=%q", i, d.State, d.Device, d.Label)
+		// 1. Enable Single Drive Mode. This is a boolean setting on the server.
+		if err := server.SetSingleDriveMode(true); err != nil {
+			fmt.Printf("Failed to enable single drive mode: %v\n", err)
+			continue
 		}
 
+		// 2. Trigger the initial drive enumeration.
+		// When single drive mode is enabled, the server will not spin up drives.
+		// Instead, it will enumerate them and send back an apBackReportUiDialog message.
+		server.ScanDrives()
+
+		// 3. Poll for the server's response.
+		driveTimeout := time.Now().Add(15 * time.Second)
 		driveIndex := -1
-		for _, d := range server.Drives {
-			if strings.Contains(strings.ToUpper(d.Device), strings.ToUpper(cfg.DriveLetter)) && d.State == AP_DriveStateInserted {
-				driveIndex = d.Index
-				break
+		for driveIndex == -1 && time.Now().Before(driveTimeout) {
+			server.OnIdle()
+			time.Sleep(500 * time.Millisecond)
+
+			// The server will have populated the Drives array via apBackUpdateDrive callbacks.
+			// Now we find the index that matches our target drive letter.
+			for _, d := range server.Drives {
+				if strings.Contains(strings.ToUpper(d.Device), strings.ToUpper(cfg.DriveLetter)) &&
+					d.State != AP_DriveStateNoDrive { // Find the first valid entry for our drive
+					driveIndex = d.Index
+					break
+				}
 			}
 		}
+
 		if driveIndex == -1 {
 			fmt.Println("Disc not found in drive", cfg.DriveLetter)
 			continue
 		}
 
+		// At this point, the GUI would show a dialog. Since this is an automation tool,
+		// we already know which drive we want. We now tell the server to open that specific drive by its index.
+		// This is the action that will cause the single, selected drive to spin up.
+		debugLog("Opening disc by index: %d", driveIndex)
+		if err := server.OpenCdDisk(uint32(driveIndex)); err != nil {
+			fmt.Printf("Failed to open disc by index: %v\n", err)
+			continue
+		}
+
+		// The server will now perform a targeted scan on the selected drive.
+		// We wait for the apBackLeaveJobMode callback, which sets DiscReady to true.
+
 		fmt.Printf("Drive Index: %d\n", driveIndex)
 		debugLog("Drive Index: %d\n", driveIndex)
-
 		fmt.Println("Scanning Disc Info...")
 
-		info := runMetadataScan(fmt.Sprintf("%d", driveIndex), cfg.MakeMKVPath)
+		//info := runMetadataScan(fmt.Sprintf("%d", driveIndex), cfg.MakeMKVPath)
 
-		//unlockDrive(handle)
-		//windows.CloseHandle(handle)
+		debugLog("Opening disc: driveIndex=%d, drive device=%q label=%q state=%d", driveIndex, server.Drives[driveIndex].Device, server.Drives[driveIndex].Label, server.Drives[driveIndex].State)
+
+		fmt.Println("Waiting for disc scan...")
+		deadline := time.Now().Add(60 * time.Second)
+		for !server.DiscReady && time.Now().Before(deadline) {
+			time.Sleep(300 * time.Millisecond)
+			server.OnIdle()
+		}
+		if !server.DiscReady {
+			fmt.Println("Disc scan timed out")
+			continue
+		}
+
+		info, err := server.ScanDisc()
+		if err != nil {
+			fmt.Printf("Failed to scan disc: %v\n", err)
+			continue
+		}
 
 		if info.Title != "" {
 			// Allow user to edit disc title before TMDB search
@@ -271,8 +330,10 @@ func main() {
 				MoveAndRename(fullTempPath, encNewName, encodingDir, cfg.DestPath)
 			}
 
-			//unlockDrive(handle)
 			ejectDrive(cfg.DriveLetter)
+			for discReady(cfg.DriveLetter) {
+				time.Sleep(500 * time.Millisecond)
+			}
 		}
 	}
 }
@@ -283,7 +344,6 @@ func setupCloseHandler() {
 	go func() {
 		<-c
 		fmt.Println("\n- Ctrl+C pressed. Cleaning up processes and exiting")
-		// Logic to kill orphaned Java/MakeMKV goes here
 		os.Exit(0)
 	}()
 }
@@ -295,9 +355,24 @@ func debugLog(format string, args ...interface{}) {
 }
 
 func discReady(letter string) bool {
-	// Checks for common optical disc structures
-	_, errIFO := os.Stat(letter + "\\VIDEO_TS")
-	_, errBDMV := os.Stat(letter + "\\BDMV")
+	// Try to open key files to ensure filesystem is responsive, like in the PowerShell script.
+	ifoPath := filepath.Join(letter, "VIDEO_TS", "VIDEO_TS.IFO")
+	if f, err := os.Open(ifoPath); err == nil {
+		f.Close()
+		debugLog("discReady: Found and opened %s", ifoPath)
+		return true
+	}
+
+	bdmvPath := filepath.Join(letter, "BDMV", "index.bdmv")
+	if f, err := os.Open(bdmvPath); err == nil {
+		f.Close()
+		debugLog("discReady: Found and opened %s", bdmvPath)
+		return true
+	}
+
+	// Fallback for discs that might not have those exact files but are ready.
+	_, errIFO := os.Stat(filepath.Join(letter, "VIDEO_TS"))
+	_, errBDMV := os.Stat(filepath.Join(letter, "BDMV"))
 	return errIFO == nil || errBDMV == nil
 }
 

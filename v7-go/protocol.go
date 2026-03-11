@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -64,6 +65,28 @@ const (
 	apBackFatalCommError uint32 = 224
 	apBackOutOfMem       uint32 = 225
 	apUnknown            uint32 = 239
+)
+
+// Attribute IDs from apdefs.h
+const (
+	//ap_iaType           = 1
+	ap_iaName = 2
+	//ap_iaLangCode       = 3
+	//ap_iaLangName       = 4
+	//ap_iaCodecId        = 5
+	//ap_iaCodecShort     = 6
+	ap_iaChapterCount = 8
+	ap_iaDuration     = 9
+	ap_iaDiskSize     = 10
+	//ap_iaDiskSizeBytes  = 11
+	//ap_iaSourceFileName = 16
+	ap_iaOutputFileName = 27
+	ap_iaVolumeName     = 32
+)
+
+// Settings from apdefs.h
+const (
+	apset_io_SingleDrive = 23
 )
 
 // AP_SHMEM flags
@@ -191,6 +214,13 @@ func recvCmd(r io.Reader, mem *APShmem) error {
 		}
 	}
 
+	// Log raw first 16 bytes
+	end := have
+	if end > 16 {
+		end = 16
+	}
+	//debugLog("recvCmd raw[0:%d]: % x", end, buf[:end])
+
 	cmd := binary.LittleEndian.Uint32(buf[0:])
 	argCount := (cmd >> 16) & 0xff
 	dataSize := cmd & 0xffff
@@ -221,16 +251,22 @@ func recvCmd(r io.Reader, mem *APShmem) error {
 // ============================================================
 
 type MKVServer struct {
-	cmd    *exec.Cmd
-	stdin  io.WriteCloser
-	stdout io.ReadCloser
-	mem    APShmem
-	Drives [AP_MaxCdromDevices]DriveInfo
+	cmd              *exec.Cmd
+	stdin            io.WriteCloser
+	stdout           io.ReadCloser
+	stderr           io.ReadCloser
+	mem              APShmem
+	isDead           bool
+	Drives           [AP_MaxCdromDevices]DriveInfo
+	TitleCount       int
+	Titles           []TitleInfo
+	CollectionHandle uint64
+	DiscReady        bool
 }
 
 // NewMKVServer launches makemkvcon in guiserver mode and performs the handshake
 func NewMKVServer(makemkvPath string) (*MKVServer, error) {
-	s := &MKVServer{}
+	s := &MKVServer{isDead: false}
 	s.cmd = exec.Command(makemkvPath, "guiserver", AP_ABI_VER+"+std")
 
 	var err error
@@ -242,9 +278,22 @@ func NewMKVServer(makemkvPath string) (*MKVServer, error) {
 	if err != nil {
 		return nil, fmt.Errorf("stdout pipe: %w", err)
 	}
+	s.stderr, err = s.cmd.StderrPipe()
+	if err != nil {
+		return nil, fmt.Errorf("stderr pipe: %w", err)
+	}
 	if err := s.cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start makemkvcon: %w", err)
 	}
+
+	// Goroutine to log stderr for debugging
+	go func() {
+		scanner := bufio.NewScanner(s.stderr)
+		for scanner.Scan() {
+			debugLog("makemkvcon stderr: %s", scanner.Text())
+		}
+	}()
+
 	if err := s.handshake(); err != nil {
 		s.cmd.Process.Kill()
 		return nil, fmt.Errorf("handshake: %w", err)
@@ -271,6 +320,12 @@ func NewMKVServer(makemkvPath string) (*MKVServer, error) {
 	if err := s.execCmd(apCallGetInterfaceLanguageData, 1, 0); err != nil {
 		s.cmd.Process.Kill()
 		return nil, fmt.Errorf("GetInterfaceLanguageData init: %w", err)
+	}
+
+	// Perform an initial drive update to populate the drive list without a hardware scan.
+	if err := s.UpdateDrives(); err != nil {
+		s.cmd.Process.Kill()
+		return nil, fmt.Errorf("initial UpdateDrives: %w", err)
 	}
 
 	return s, nil
@@ -325,10 +380,21 @@ func (s *MKVServer) handshake() error {
 
 // transact sends the current mem and receives the response
 func (s *MKVServer) transact() error {
+	if s.isDead {
+		return fmt.Errorf("server process is dead")
+	}
 	if err := sendCmd(s.stdin, &s.mem); err != nil {
+		if strings.Contains(err.Error(), "pipe is being closed") {
+			debugLog("transact: detected dead pipe on send")
+			s.isDead = true
+		}
 		return fmt.Errorf("send: %w", err)
 	}
 	if err := recvCmd(s.stdout, &s.mem); err != nil {
+		if err == io.EOF || strings.Contains(err.Error(), "pipe is being closed") {
+			debugLog("transact: detected dead pipe on recv")
+			s.isDead = true
+		}
 		return fmt.Errorf("recv: %w", err)
 	}
 	return nil
@@ -344,7 +410,7 @@ func (s *MKVServer) execCmd(cmd uint32, argCount uint32, dataSize uint32) error 
 		}
 
 		recvCmdVal, _, _ := CmdUnpack(s.mem.Cmd)
-		debugLog("execCmd recv: cmd=0x%x (%d)", recvCmdVal, recvCmdVal)
+		//debugLog("execCmd recv: cmd=0x%x (%d)", recvCmdVal, recvCmdVal)
 		if recvCmdVal == apReturn {
 			return nil
 		}
@@ -360,8 +426,8 @@ func (s *MKVServer) execCmd(cmd uint32, argCount uint32, dataSize uint32) error 
 func (s *MKVServer) handleCallback(cmd uint32) (uint32, uint32) {
 	switch cmd {
 	case apBackReportUiMessage:
-		msg := nullTermString(s.mem.StrBuf[:])
-		debugLog("MKV msg: %s", msg)
+		//msg := nullTermString(s.mem.StrBuf[:])
+		//debugLog("MKV msg: %s", msg)
 		s.mem.Args[0] = 0
 		return 1, 0
 
@@ -371,7 +437,7 @@ func (s *MKVServer) handleCallback(cmd uint32) (uint32, uint32) {
 		return 1, 1
 
 	case apBackUpdateDrive:
-		debugLog("apBackUpdateDrive raw: args=%v", s.mem.Args[:5])
+		//debugLog("apBackUpdateDrive raw: args=%v", s.mem.Args[:5])
 		idx := int(s.mem.Args[0])
 		state := s.mem.Args[2]
 		fsFlags := s.mem.Args[3]
@@ -390,7 +456,7 @@ func (s *MKVServer) handleCallback(cmd uint32) (uint32, uint32) {
 		if s.mem.Args[1]&4 != 0 {
 			devName = nullTermString(p)
 		}
-
+		debugLog("apBackUpdateDrive callback: index=%d state=%d label=%q device=%q drvName=%q", idx, state, dskName, devName, drvName)
 		if idx < AP_MaxCdromDevices {
 			s.Drives[idx] = DriveInfo{
 				Index:   idx,
@@ -399,7 +465,7 @@ func (s *MKVServer) handleCallback(cmd uint32) (uint32, uint32) {
 				Label:   dskName,
 				Device:  devName,
 			}
-			debugLog("MKV drive update: index=%d state=%d label=%q device=%q", idx, state, dskName, devName)
+			//debugLog("MKV drive update: index=%d state=%d label=%q device=%q", idx, state, dskName, devName)
 		}
 		return 0, 0
 
@@ -420,14 +486,16 @@ func (s *MKVServer) handleCallback(cmd uint32) (uint32, uint32) {
 		return 0, 0
 
 	case apBackUpdateCurrentInfo:
-		debugLog("MKV info[%d]: %s", s.mem.Args[0], nullTermString(s.mem.StrBuf[:]))
+		//debugLog("MKV info[%d]: %s", s.mem.Args[0], nullTermString(s.mem.StrBuf[:]))
 		return 0, 0
 
 	case apBackEnterJobMode:
+		s.DiscReady = false
 		debugLog("MKV enter job mode")
 		return 0, 0
 
 	case apBackLeaveJobMode:
+		s.DiscReady = true
 		debugLog("MKV leave job mode")
 		return 0, 0
 
@@ -435,8 +503,26 @@ func (s *MKVServer) handleCallback(cmd uint32) (uint32, uint32) {
 		debugLog("MKV exit signal received")
 		return 0, 0
 
-	case apBackSetTitleCollInfo, apBackSetTitleInfo,
-		apBackSetTrackInfo, apBackSetChapterInfo:
+	case apBackSetTitleCollInfo:
+		s.CollectionHandle = uint64(s.mem.Args[0]) | uint64(s.mem.Args[1])<<32
+		count := int(s.mem.Args[2])
+		s.TitleCount = count
+		s.Titles = make([]TitleInfo, count)
+		return 0, 0
+
+	case apBackSetTitleInfo:
+		id := int(s.mem.Args[0])
+		handle := uint64(s.mem.Args[1]) | uint64(s.mem.Args[2])<<32
+		trackCount := s.mem.Args[3]
+		chapterCount := s.mem.Args[4]
+		if id < len(s.Titles) {
+			s.Titles[id].Handle = handle
+			s.Titles[id].TrackCount = trackCount
+			s.Titles[id].ChapterCount = chapterCount
+		}
+		return 0, 0
+
+	case apBackSetTrackInfo, apBackSetChapterInfo:
 		return 0, 0
 
 	default:
@@ -456,12 +542,44 @@ func (s *MKVServer) OnIdle() error {
 	return s.execCmd(apCallOnIdle, 0, 0)
 }
 
+func (s *MKVServer) SetSingleDrive(device string) error {
+	s.mem = APShmem{}
+	b := append([]byte(device), 0)
+	copy(s.mem.StrBuf[:], b)
+	s.mem.Args[0] = apset_io_SingleDrive
+	debugLog("SetSingleDrive: sending command apCallSetSettingString with setting ID %d and value %q", apset_io_SingleDrive, device)
+	return s.execCmd(apCallSetSettingString, 1, uint32(len(b)))
+}
+
+// SetSingleDriveMode enables or disables the single drive mode boolean setting.
+func (s *MKVServer) SetSingleDriveMode(enable bool) error {
+	s.mem = APShmem{}
+	s.mem.Args[0] = apset_io_SingleDrive
+	s.mem.Args[1] = boolToUint32(enable)
+	return s.execCmd(apCallSetSettingInt, 2, 0)
+}
+
+// ScanDrives enumerates drives without scanning disc content
+func (s *MKVServer) ScanDrives() error {
+	s.mem = APShmem{}
+	s.mem.Args[0] = 0 // full scan - only call this once when disc detected
+	debugLog("ScanDrives: sending command apCallUpdateAvailableDrives with Args[0]=%d", s.mem.Args[0])
+	return s.execCmd(apCallUpdateAvailableDrives, 1, 0)
+}
+
 // UpdateDrives enumerates drives without scanning disc content
 // AP_UpdateDrivesFlagNoScan avoids seeking drives that are ripping
 func (s *MKVServer) UpdateDrives() error {
 	s.mem = APShmem{}
-	s.mem.Args[0] = 0 //AP_UpdateDrivesFlagNoScan | AP_UpdateDrivesFlagNoSingleDrive
+	s.mem.Args[0] = 1 // AP_UpdateDrivesFlagNoScan - refresh state without hardware probe
 	return s.execCmd(apCallUpdateAvailableDrives, 1, 0)
+}
+
+// ScanConfiguredDrives probes hardware respecting current settings (like apset_io_SingleDrive).
+func (s *MKVServer) ScanConfiguredDrives() error {
+	s.mem = APShmem{}
+	debugLog("ScanConfiguredDrives: sending command apCallUpdateAvailableDrives with 0 arguments")
+	return s.execCmd(apCallUpdateAvailableDrives, 0, 0)
 }
 
 // SetOutputFolder sets the rip destination folder
@@ -479,6 +597,8 @@ func (s *MKVServer) OpenCdDisk(driveIndex uint32) error {
 	s.mem.Args[1] = 0
 	return s.execCmd(apCallOpenCdDisk, 2, 0)
 }
+
+// SetTitleEnabled rips selected titles
 
 // SaveAllTitles rips all selected titles to MKV
 func (s *MKVServer) SaveAllTitles() error {
@@ -516,14 +636,40 @@ func (s *MKVServer) Close() {
 	if s.stdout != nil {
 		s.stdout.Close()
 	}
+	if s.stderr != nil {
+		s.stderr.Close()
+	}
 	if s.cmd != nil && s.cmd.Process != nil {
 		s.cmd.Process.Kill()
 	}
 }
 
+func (s *MKVServer) GetUiItemInfo(handle uint64, attrID uint32) (string, error) {
+	s.mem = APShmem{}
+	s.mem.Args[0] = uint32(handle)
+	s.mem.Args[1] = uint32(handle >> 32)
+	s.mem.Args[2] = attrID
+	if err := s.execCmd(apCallGetUiItemInfo, 3, 0); err != nil {
+		return "", err
+	}
+	if s.mem.Args[1] == 0 {
+		return "", nil
+	}
+	// UTF-8 string in strbuf
+	//debugLog("GetUiItemInfo attr=%d raw strbuf: % x", attrID, s.mem.StrBuf[:32])
+	return nullTermString(s.mem.StrBuf[:]), nil
+}
+
 // ============================================================
 // Helpers
 // ============================================================
+
+func boolToUint32(b bool) uint32 {
+	if b {
+		return 1
+	}
+	return 0
+}
 
 func nullTermString(b []byte) string {
 	for i, c := range b {
@@ -532,4 +678,43 @@ func nullTermString(b []byte) string {
 		}
 	}
 	return string(b)
+}
+
+func (s *MKVServer) ScanDisc() (DiscInfo, error) {
+	var info DiscInfo
+
+	// Get disc title from title collection handle
+	volName, err := s.GetUiItemInfo(s.CollectionHandle, ap_iaVolumeName)
+	if err == nil && volName != "" {
+		info.Title = volName
+	}
+
+	for i, t := range s.Titles {
+		if t.Handle == 0 {
+			continue
+		}
+		name, _ := s.GetUiItemInfo(t.Handle, ap_iaName)
+		duration, _ := s.GetUiItemInfo(t.Handle, ap_iaDuration)
+		fileName, _ := s.GetUiItemInfo(t.Handle, ap_iaOutputFileName)
+		fileSize, _ := s.GetUiItemInfo(t.Handle, ap_iaDiskSize)
+
+		minutes := parseDurationToMinutes(duration)
+
+		info.Features = append(info.Features, TitleMetadata{
+			Index:    i,
+			Minutes:  minutes,
+			FileName: fileName,
+			FileSize: fileSize,
+		})
+		debugLog("Title[%d]: name=%q file=%q duration=%q size=%q", i, name, fileName, duration, fileSize)
+	}
+	return info, nil
+}
+
+func parseDurationToMinutes(duration string) int {
+	// duration comes back as "h:mm:ss"" or total seconds string
+
+	var secs int
+	fmt.Sscanf(duration, "%d", &secs)
+	return secs / 60
 }
