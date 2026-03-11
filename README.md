@@ -3,6 +3,62 @@
 A collection of PowerShell scripts, modules, and a Go automation tool used to rip, encode, and manage a personal media archive.  The repository has grown over several major revisions as new workflows and helper functions were developed.  Scripts range from one‑off utilities for grabbing disc metadata to general purpose modules that drive long‑running encoding pipelines.
 
 ---
+
+## 🔧 Core Dependencies
+
+This project relies on several external tools. Most workflows require more than one — make sure you have everything installed that applies to the scripts you intend to use.
+
+### 🎬 MakeMKV ⚠️ Proprietary — Please Support the Developers
+
+Required for all **disc inspection and ripping** workflows (`v7-go`, `Get-DVDTitle.ps1`, and related scripts). Scripts that work purely on already-ripped files do not require MakeMKV, but anything touching a physical disc does.
+
+MakeMKV is **not open source freeware**. It is proprietary software developed and maintained by a small, independent team. If this project is useful to you, please support the developers:
+
+> 💳 **Purchase a license: [https://www.makemkv.com/buy/](https://www.makemkv.com/buy/)**
+
+A purchased license is permanent, covers all platforms, and directly funds continued development of MakeMKV. It is the single best thing you can do to keep this tool alive.
+
+A **free time-limited beta key** is periodically posted on the MakeMKV forum for evaluation:
+> 🔑 [https://forum.makemkv.com/forum/viewtopic.php?t=1053](https://forum.makemkv.com/forum/viewtopic.php?t=1053)
+
+MakeMKV usage is governed by the [MakeMKV End User License Agreement](https://www.makemkv.com/eula.html). The open-source component (`makemkv-oss`) is dual-licensed under GPL-2.0 and MPL-1.1. See the [MakeMKV Linux build instructions](https://forum.makemkv.com/forum/viewtopic.php?f=3&t=224) if you need to compile from source on Linux, or [my github repo](https://github.com/abanta1/makemkv-gui) maintained for convenience and helping spread awareness of the tool.
+
+---
+
+### ✂️ HandBrake
+
+Required for all **encoding workflows** (v5 modules, encode pipeline). Used to transcode ripped titles with fine-grained control over codec, quality, audio tracks, and subtitles.
+
+> 🔗 [https://handbrake.fr/](https://handbrake.fr/) — Free and open source (GPL-2.0)  
+> CLI docs: [https://handbrake.fr/docs/en/latest/cli/cli-options.html](https://handbrake.fr/docs/en/latest/cli/cli-options.html)
+
+---
+
+### 🔊 FFmpeg
+
+Required for **audio analysis, loudness measurement, and codec inspection** throughout the v5 encode workflow. Also used alongside `ffprobe` for track metadata. If building MakeMKV from source on Linux, a recent FFmpeg (≥ 2.0) is needed for 24-bit FLAC, AAC, and DTS-HD support.
+
+> 🔗 [https://ffmpeg.org/](https://ffmpeg.org/) — Free and open source (LGPL-2.1 / GPL-2.0)
+
+---
+
+### 📊 MediaInfo
+
+Required for **codec and container metadata** in the v5 encode workflow. Used alongside ffprobe and mkvmerge as one of the multi-tool consensus sources for track classification.
+
+> 🔗 [https://mediaarea.net/en/MediaInfo](https://mediaarea.net/en/MediaInfo) — Free and open source (BSD-2-Clause)
+
+---
+
+### 🎥 TMDb API
+
+Required for **title matching and metadata lookup** in `v7-go` and `Get-DVDTitle.ps1`. A free API key is available by creating an account on The Movie Database.
+
+> 🔗 [https://www.themoviedb.org/](https://www.themoviedb.org/) — Free API key, attribution required  
+> API docs: [https://developer.themoviedb.org/docs](https://developer.themoviedb.org/docs)
+
+---
+
 ## 🧭 Guiding Principles
 - **Facts over assumptions.** Every decision the pipeline makes is grounded in measurable data — acoustic analysis (LRA, RMS, spectral flatness), element counts, codec metadata, and multi-tool consensus. If the data is ambiguous, the system says so rather than guessing.
 - **Multi-tool consensus over single-source trust.** No single tool (HandBrake, ffprobe, mkvmerge, MediaInfo) is treated as authoritative. Each provides a vote, conflicts are resolved by weighted scoring, and confidence levels are tracked and surfaced to the user.
