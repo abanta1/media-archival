@@ -276,58 +276,102 @@ func main() {
 			fmt.Println("Identifying video via TMDB...")
 			RunParallelLookups(&info, TmdbKey)
 
+			// Resolve disc-level identity once - all cuts share same folder
+			imdbID := "unknown"
+			encodingTitle := CleanTitle(info.Title)
+			year := ""
+			if len(info.Matches) > 0 {
+				m := info.Matches[0]
+				if m.ImdbID != "" {
+					imdbID = m.ImdbID
+				}
+				encodingTitle = CleanTitle(m.Title)
+				year = m.Year
+			}
+			yearPart := ""
+			if year != "" {
+				yearPart = fmt.Sprintf(" (%s)", year)
+			}
+			encodingDir := fmt.Sprintf("%s%s {imdb-%s}", encodingTitle, yearPart, imdbID)
+			encNewName := fmt.Sprintf("%s%s.mkv", encodingTitle, yearPart)
+			fullTempPath := filepath.Join(cfg.RipPath, encodingDir)
+			debugLog("Encoding Dir: %s", encodingDir)
+			debugLog("Encoding New Name: %s", encNewName)
+			debugLog("Temp path: %s", fullTempPath)
+			if err := os.MkdirAll(fullTempPath, 0755); err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to create temp directory %q: %v\n", fullTempPath, err)
+				continue
+			}
+
 			for _, cut := range info.DistinctCuts {
-				var match *MatchResult
-				for i := range info.Matches {
-					if info.Matches[i].Index == cut.Index {
-						match = &info.Matches[i]
-						break
-					}
-				}
-				imdbID := "unknown"
-				encodingTitle := info.Title
-				year := ""
-				if match != nil {
-					imdbID = match.ImdbID
-					encodingTitle = match.Title
-					year = match.Year
-				}
-				yearPart := ""
-				if year != "" {
-					yearPart = fmt.Sprintf(" (%s)", year)
-				}
-				encodingDir := fmt.Sprintf("%s%s {imdb-%s}", encodingTitle, yearPart, imdbID)
-				encNewName := fmt.Sprintf("%s%s", encodingTitle, yearPart)
-				fullTempPath := filepath.Join(cfg.RipPath, encodingDir)
-				os.MkdirAll(fullTempPath, 0755)
-				args := []string{
-					"-r",
-					"--progress=-stdout",
-					"mkv",
-					"--noscan",
-					"--minlength=900",
-					"disc:" + fmt.Sprintf("%d", driveIndex),
-					fmt.Sprintf("%d", cut.Index),
-					fullTempPath,
-				}
-
 				debugLog("Cut #%d: encodingTitle='%s' year='%s' imdbID='%s'", cut.Index, encodingTitle, year, imdbID)
-				debugLog("encodingDir: %s", encodingDir)
-				debugLog("encNewName: %s", encNewName)
-				debugLog("origName: %s", cut.FileName)
-				debugLog("fileSize: %s", cut.FileSize)
-				debugLog("fullTempPath: %s", fullTempPath)
-				debugLog("DestPath: %s", cfg.DestPath)
-				debugLog("Rip args: %v", args)
+				debugLog("Cut #%d: encodingDir: %s", cut.Index, encodingDir)
+				debugLog("Cut #%d: origName: %s", cut.Index, cut.FileName)
+				debugLog("Cut #%d: encNewName: %s", cut.Index, encNewName)
+				debugLog("Cut #%d: fileSize: %s", cut.Index, cut.FileSize)
+				debugLog("Cut #%d: fullTempPath: %s", cut.Index, fullTempPath)
+				debugLog("Cut #%d: DestPath: %s", cut.Index, cfg.DestPath)
 
-				expectedFile := filepath.Join(fullTempPath, cut.FileName)
+				expectedFile := filepath.Join(fullTempPath, encNewName)
 				if _, err := os.Stat(expectedFile); err == nil {
 					fmt.Printf("File already exists, skipping: %s\n", expectedFile)
 					continue
 				}
 
-				InvokeMakeMKVRip(encNewName, args, cfg.MakeMKVPath)
-				MoveAndRename(fullTempPath, encNewName, encodingDir, cfg.DestPath)
+				titleHandle := server.Titles[cut.Index].Handle
+				if titleHandle == 0 {
+					fmt.Fprintf(os.Stderr, "Error: title %d has no handle, skipping\n", cut.Index)
+					continue
+				}
+
+				// Deselect all titles, then select only this cut
+				for i, t := range server.Titles {
+					if t.Handle != 0 {
+						if err := server.SetTitleSelected(i, false); err != nil {
+							debugLog("SetTitleSelected(false) failed for handle %d: %v", i, err)
+						}
+					}
+				}
+
+				if err := server.SetTitleSelected(cut.Index, true); err != nil {
+					fmt.Fprintf(os.Stderr, "Error: SetTitleSelected(true) failed: %v\n", err)
+					continue
+				}
+				baseName := strings.TrimSuffix(encNewName, ".mkv")
+
+				if err := server.SetDefaultOutputFileName(baseName); err != nil {
+					debugLog("SetDefaultOutputFileName failed: %v", err)
+				} else {
+					debugLog("SetDefaultOutputFileName success")
+				}
+
+				// Verify the name was actually accepted
+				if actual, err := server.GetUiItemInfo(titleHandle, ap_iaOutputFileName); err == nil {
+					if actual != encNewName {
+						fmt.Fprintf(os.Stderr, "Warning: MakeMKV rejected filename %q, will rip as %q\n", encNewName, actual)
+					}
+				}
+
+				if err := server.SetOutputFolder(fullTempPath); err != nil {
+					fmt.Fprintf(os.Stderr, "Error: SetOutputFolder() failed: %v\n", err)
+					continue
+				}
+
+				fmt.Printf("Ripping title %d: %s\n", cut.Index, encNewName)
+
+				server.DiscReady = false
+				if err := server.SaveAllTitles(); err != nil {
+					fmt.Fprintf(os.Stderr, "Rip failed for title %d: %v\n", cut.Index, err)
+					continue
+				}
+
+				// SaveAllTitles is async — poll OnIdle until LeaveJobMode sets DiscReady
+				for !server.DiscReady {
+					time.Sleep(500 * time.Millisecond)
+					server.OnIdle()
+				}
+
+				//MoveAndRename(fullTempPath, encNewName, encNewName, encodingDir, cfg.DestPath)
 			}
 
 			ejectDrive(cfg.DriveLetter)
@@ -338,6 +382,22 @@ func main() {
 	}
 }
 
+func CleanTitle(s string) string {
+	// Strips illegal NTFS filename characters
+	var b strings.Builder
+	for _, r := range s {
+		switch r {
+		case ':':
+			b.WriteRune('-')
+		case '\\', '/', '*', '?', '"', '<', '>', '|':
+			// drop
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return strings.TrimSpace(b.String())
+}
+
 func setupCloseHandler() {
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
@@ -346,6 +406,42 @@ func setupCloseHandler() {
 		fmt.Println("\n- Ctrl+C pressed. Cleaning up processes and exiting")
 		os.Exit(0)
 	}()
+}
+
+func promptOptionalEditWithTimeout(label, currentValue string, timeout time.Duration) (string, bool) {
+	fmt.Printf("%s: %s\n", label, currentValue)
+	fmt.Printf("Press Enter to edit, any other key to continue (%s)...\n", timeout)
+
+	keyCh := make(chan byte, 1)
+	go func() {
+		oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
+		if err != nil {
+			keyCh <- 0
+			return
+		}
+		defer term.Restore(int(os.Stdin.Fd()), oldState)
+		var buf [1]byte
+		os.Stdin.Read(buf[:])
+		keyCh <- buf[0]
+	}()
+
+	select {
+	case key := <-keyCh:
+		fmt.Println()
+		if key == 13 {
+			fmt.Printf("Enter new value [%s]: ", currentValue)
+			reader := bufio.NewReader(os.Stdin)
+			newValue, _ := reader.ReadString('\n')
+			newValue = strings.TrimSpace(newValue)
+			if newValue != "" && newValue != currentValue {
+				return newValue, true
+			}
+		}
+	case <-time.After(timeout):
+		fmt.Println("\nContinuing...")
+	}
+
+	return currentValue, false
 }
 
 func debugLog(format string, args ...interface{}) {
@@ -359,7 +455,7 @@ func discReady(letter string) bool {
 	ifoPath := filepath.Join(letter, "VIDEO_TS", "VIDEO_TS.IFO")
 	if f, err := os.Open(ifoPath); err == nil {
 		f.Close()
-		debugLog("discReady: Found and opened %s", ifoPath)
+		debugLog("\ndiscReady: Found and opened %s", ifoPath)
 		return true
 	}
 

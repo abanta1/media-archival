@@ -86,7 +86,8 @@ const (
 
 // Settings from apdefs.h
 const (
-	apset_io_SingleDrive = 23
+	apset_io_SingleDrive                   = 23
+	apset_app_DefaultOutputFileName uint32 = 40 // from ApSettingId enum (0-indexed: apset_Unknown=0...apset_app_DefaultOutputFileName=39)
 )
 
 // AP_SHMEM flags
@@ -416,6 +417,9 @@ func (s *MKVServer) execCmd(cmd uint32, argCount uint32, dataSize uint32) error 
 		}
 
 		// Handle callback then reply with apClientDone
+		if recvCmdVal != apBackUpdateCurrentBar && recvCmdVal != apBackUpdateTotalBar {
+			//debugLog("execCmd callback: cmd=%d (0x%x)", recvCmdVal, recvCmdVal)
+		}
 		replyArgs, replyData := s.handleCallback(recvCmdVal)
 		s.mem.Cmd = CmdPack(apClientDone, replyArgs, replyData)
 	}
@@ -427,13 +431,21 @@ func (s *MKVServer) handleCallback(cmd uint32) (uint32, uint32) {
 	switch cmd {
 	case apBackReportUiMessage:
 		//msg := nullTermString(s.mem.StrBuf[:])
-		//debugLog("MKV msg: %s", msg)
+		//debugLog("MKV msg: flags=%d code=%d msg=%q", s.mem.Args[0], s.mem.Args[1], msg)
 		s.mem.Args[0] = 0
 		return 1, 0
 
 	case apBackReportUiDialog:
+		// Log dialog details so we can see what MakeMKV is asking
+		dialogType := s.mem.Args[0]
+		dialogID := s.mem.Args[1]
+		dialogMsg := nullTermString(s.mem.StrBuf[:])
+		debugLog("MKV dialog: type=%d id=%d msg=%q", dialogType, dialogID, dialogMsg)
+		// Repsond with button 0 (default/OK) rather than -1 (no handler),
+		// which may cause MakeMKV to cancel the job during a rip
 		s.mem.StrBuf[0] = 0
-		s.mem.Args[0] = 0xffffffff // -1 = no handler
+		s.mem.Args[0] = 0
+		//s.mem.Args[0] = 0xffffffff // -1 = no handler
 		return 1, 1
 
 	case apBackUpdateDrive:
@@ -456,7 +468,7 @@ func (s *MKVServer) handleCallback(cmd uint32) (uint32, uint32) {
 		if s.mem.Args[1]&4 != 0 {
 			devName = nullTermString(p)
 		}
-		debugLog("apBackUpdateDrive callback: index=%d state=%d label=%q device=%q drvName=%q", idx, state, dskName, devName, drvName)
+		//debugLog("apBackUpdateDrive callback: index=%d state=%d label=%q device=%q drvName=%q", idx, state, dskName, devName, drvName)
 		if idx < AP_MaxCdromDevices {
 			s.Drives[idx] = DriveInfo{
 				Index:   idx,
@@ -598,7 +610,20 @@ func (s *MKVServer) OpenCdDisk(driveIndex uint32) error {
 	return s.execCmd(apCallOpenCdDisk, 2, 0)
 }
 
-// SetTitleEnabled rips selected titles
+// SetTitleSelected enables or disables a title for ripping
+// Args: CollectionHandle (low/high), title index, Qt::CheckState (0=unchecked, 2=checked).
+func (s *MKVServer) SetTitleSelected(titleIndex int, selected bool) error {
+	s.mem = APShmem{}
+	s.mem.Args[0] = uint32(s.CollectionHandle)
+	s.mem.Args[1] = uint32(s.CollectionHandle >> 32)
+	s.mem.Args[2] = uint32(titleIndex)
+	if selected {
+		s.mem.Args[3] = 2 // Qt::Checked
+	} else {
+		s.mem.Args[3] = 0 // Qt::Unchecked
+	}
+	return s.execCmd(apCallSetUiItemState, 4, 0)
+}
 
 // SaveAllTitles rips all selected titles to MKV
 func (s *MKVServer) SaveAllTitles() error {
@@ -660,6 +685,15 @@ func (s *MKVServer) GetUiItemInfo(handle uint64, attrID uint32) (string, error) 
 	return nullTermString(s.mem.StrBuf[:]), nil
 }
 
+// Set the global output filename template before ripping
+func (s *MKVServer) SetDefaultOutputFileName(name string) error {
+	s.mem = APShmem{}
+	b := append([]byte(name), 0)
+	copy(s.mem.StrBuf[:], b)
+	s.mem.Args[0] = apset_app_DefaultOutputFileName
+	return s.execCmd(apCallSetSettingString, 1, uint32(len(b)))
+}
+
 // ============================================================
 // Helpers
 // ============================================================
@@ -695,18 +729,18 @@ func (s *MKVServer) ScanDisc() (DiscInfo, error) {
 		}
 		name, _ := s.GetUiItemInfo(t.Handle, ap_iaName)
 		duration, _ := s.GetUiItemInfo(t.Handle, ap_iaDuration)
-		fileName, _ := s.GetUiItemInfo(t.Handle, ap_iaOutputFileName)
+		//fileName, _ := s.GetUiItemInfo(t.Handle, ap_iaOutputFileName)
 		fileSize, _ := s.GetUiItemInfo(t.Handle, ap_iaDiskSize)
 
 		minutes := parseDurationToMinutes(duration)
 
 		info.Features = append(info.Features, TitleMetadata{
-			Index:    i,
-			Minutes:  minutes,
-			FileName: fileName,
+			Index:   i,
+			Minutes: minutes,
+			//FileName: fileName,
 			FileSize: fileSize,
 		})
-		debugLog("Title[%d]: name=%q file=%q duration=%q size=%q", i, name, fileName, duration, fileSize)
+		debugLog("Title[%d]: name=%q file=%q duration=%q size=%q", i, name /*fileName,*/, duration, fileSize)
 	}
 	return info, nil
 }

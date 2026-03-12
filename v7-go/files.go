@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-func MoveAndRename(fullPath, encodingName, encodingDir string, baseOutputDir string) error {
+func MoveAndRename(fullPath, desiredName, encodingName, encodingDir string, baseOutputDir string) error {
 	// Find all mkv files in the temp rip dir
 	files, err := os.ReadDir(fullPath)
 	if err != nil {
@@ -24,7 +24,7 @@ func MoveAndRename(fullPath, encodingName, encodingDir string, baseOutputDir str
 			continue
 		}
 
-		debugLog("MoveAndRename: fullPath='%s' encodingName='%s' encodingDir='%s' baseOutputDir='%s'", fullPath, encodingName, encodingDir, baseOutputDir)
+		debugLog("MoveAndRename: fullPath='%s' desiredName='%s' encodingName='%s' encodingDir='%s' baseOutputDir='%s'", fullPath, encodingName, encodingDir, baseOutputDir)
 
 		matches := reRip.FindStringSubmatch(file.Name())
 		ripExt := matches[2] // e.g., "_t00"

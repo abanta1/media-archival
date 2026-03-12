@@ -42,26 +42,41 @@ func SearchMovieMatch(title string, runtime int, apiKey string) (*TMDBResult, st
 	// Check top 5 results for runtime match
 	for _, movie := range searchResp.Results[:min(5, len(searchResp.Results))] {
 		// Get full details for runtime
-		detailsURL := fmt.Sprintf("https://api.themoviedb.org/3/movie/%d?api_key=%s", movie.ID, apiKey)
-		debugLog("Fetching details for '%s' (id=%d), runtime=%d", movie.Title, movie.ID, runtime)
-
-		dResp, _ := http.Get(detailsURL)
-		var details TMDBResult
-		json.NewDecoder(dResp.Body).Decode(&details)
-		dResp.Body.Close()
+		debugLog("Fetching details for '%s' (id=%d), runtime=%d", movie.Title, movie.ID, movie.Runtime)
+		details, err := fetchMovieDetails(movie.ID, apiKey)
+		if err != nil {
+			continue
+		}
 
 		diff := mathAbs(runtime - details.Runtime)
 		debugLog("  '%s' runtime=%d diff=%d", details.Title, details.Runtime, diff)
 
 		if diff <= 2 {
-			return &details, "Runtime Match"
+			return details, "Runtime Match"
 		}
 		if diff <= 10 {
-			return &details, "Runtime within 10m"
+			return details, "Runtime within 10m"
 		}
 	}
 
-	return &searchResp.Results[0], "Popularity Fallback"
+	details, err := fetchMovieDetails(searchResp.Results[0].ID, apiKey)
+	if err != nil {
+		return &searchResp.Results[0], "Popularity Fallback"
+	}
+	return details, "Popularity Match"
+}
+
+func fetchMovieDetails(id int, apiKey string) (*TMDBResult, error) {
+	detailsURL := fmt.Sprintf("https://api.themoviedb.org/3/movie/%d?api_key=%s", id, apiKey)
+	dResp, err := http.Get(detailsURL)
+	if err != nil {
+		return nil, err
+	}
+	defer dResp.Body.Close()
+	var details TMDBResult
+	json.NewDecoder(dResp.Body).Decode(&details)
+
+	return &details, nil
 }
 
 func min(a, b int) int {
@@ -70,6 +85,7 @@ func min(a, b int) int {
 	}
 	return b
 }
+
 func mathAbs(n int) int {
 	if n < 0 {
 		return -n
