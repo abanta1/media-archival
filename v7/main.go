@@ -70,12 +70,11 @@ func main() {
 
 		fmt.Fprintf(os.Stderr, "  -H, --help\n\tPrints this help message\n")
 		fmt.Fprintf(os.Stderr, "  -V, --debug\n\tEnable verbose logging\n\n")
-		fmt.Fprintf(os.Stderr, "  -C, --config [string]\n\tPath to config file (default \"config.json\")\n\t"+
+		fmt.Fprintf(os.Stderr, "  -C, --config [string]\n\tPath to new/existing config file (default \"config.json\")\n\t"+
 			"  config file used for static/normal defaults. Flags override config.\n\t  disc drive, API key, destination dir\n\n")
 		fmt.Fprintf(os.Stderr, "  -T, --drive <driveletter:> - i.e. --drive D:\n\tSpecifies the disc drive to use\n\n")
 		fmt.Fprintf(os.Stderr, "  -K, --apikey <key> - i.e. --apikey 123ABC\n\tSpecifies the TMDB API key to use for title matching\n\n")
 		fmt.Fprintf(os.Stderr, "  -D, --dest <dir> - i.e. --dest C:\\Path\\to\\Final\\\n\tSpecifies the path to use as the base directory for final location\n\n")
-		fmt.Fprintf(os.Stderr, "  -R, --rip <dir> - i.e. --dest C:\\Path\\to\\Rip\\\n\tSpecifies the path to use as the base directory for rips\n\n")
 		fmt.Fprintf(os.Stderr, "  -M, --makemkv <dir> - i.e. --dest C:\\Path\\to\\makemkvcon.exe\\\n\tSpecifies the path to use for MakeMKV binary\n\n")
 		//flag.PrintDefaults() // Prints alphabetically
 	}
@@ -93,9 +92,6 @@ func main() {
 	} else if cfg.APIKey != "" {
 		TmdbKey = cfg.APIKey
 	}
-	if *ripDir != "" {
-		cfg.RipPath = *ripDir
-	}
 	if *destDir != "" {
 		cfg.DestPath = *destDir
 	}
@@ -106,7 +102,7 @@ func main() {
 		cfg.MakeMKVPath = *makemkvPath
 	}
 
-	if cfg.APIKey == "" || cfg.DestPath == "" || cfg.DriveLetter == "" || cfg.MakeMKVPath == "" || cfg.RipPath == "" {
+	if cfg.APIKey == "" || cfg.DestPath == "" || cfg.DriveLetter == "" || cfg.MakeMKVPath == "" {
 		fmt.Fprintln(os.Stderr, "Error: API Key, Destination Dir and Drive letter are required (via flag or config).")
 		flag.Usage()
 		os.Exit(0)
@@ -224,9 +220,9 @@ func main() {
 		// The server will now perform a targeted scan on the selected drive.
 		// We wait for the apBackLeaveJobMode callback, which sets DiscReady to true.
 
-		fmt.Printf("Drive Index: %d\n", driveIndex)
+		//fmt.Printf("Drive Index: %d\n", driveIndex)
 		debugLog("Drive Index: %d\n", driveIndex)
-		fmt.Println("Scanning Disc Info...")
+		//fmt.Println("Scanning Disc Info...")
 
 		debugLog("Opening disc: driveIndex=%d, drive device=%q label=%q state=%d", driveIndex, server.Drives[driveIndex].Device, server.Drives[driveIndex].Label, server.Drives[driveIndex].State)
 
@@ -264,6 +260,12 @@ func main() {
 				defer term.Restore(int(os.Stdin.Fd()), oldState)
 				var buf [1]byte
 				os.Stdin.Read(buf[:])
+				if buf[0] == 3 {
+					term.Restore(int(os.Stdin.Fd()), oldState)
+					resetScrollRegion()
+					fmt.Println("\n- Ctrl+C pressed. Cleaning up processes and exiting")
+					os.Exit(0)
+				}
 				keyCh <- buf[0]
 			}()
 
@@ -322,9 +324,22 @@ func main() {
 			if year != "" {
 				yearPart = fmt.Sprintf("(%s)", year) // (2022)
 			}
-			encodingDir := fmt.Sprintf("%s %s {imdb-%s}", encodingTitle, yearPart, imdbID) // The Nut Job 2 (2022) {imdb-tt123456}
-			encodingTitleName := fmt.Sprintf("%s %s", encodingTitle, yearPart)             // The Nut Job 2 (2022)
-			fullTempPath := filepath.Join(cfg.RipPath, encodingDir)                        // G:\makemkvcon\The Nut Job 2 (2022) {imdb-tt123456}
+
+			needsReview := false
+			for _, m := range info.Matches {
+				if m.NeedsReview {
+					needsReview = true
+					break
+				}
+			}
+
+			reviewDirSuffix := ""
+			if needsReview {
+				reviewDirSuffix = " [NeedsReview]"
+			}
+			encodingDir := fmt.Sprintf("%s %s {imdb-%s}%s", encodingTitle, yearPart, imdbID, reviewDirSuffix) // The Nut Job 2 (2022) {imdb-tt123456} [NeedsReview]
+			encodingTitleName := fmt.Sprintf("%s %s", encodingTitle, yearPart)                                // The Nut Job 2 (2022)
+			fullTempPath := filepath.Join(cfg.DestPath, encodingDir)                                          // G:\makemkvcon\The Nut Job 2 (2022) {imdb-tt123456}
 			debugLog("Video Encoding Title: %s", encodingTitle)
 			debugLog("Video Encoding Title Name: %s", encodingTitleName)
 			debugLog("Video Encoding Dir: %s", encodingDir)
@@ -349,21 +364,18 @@ func main() {
 					vidDef = ""
 				}
 
-				var extendedSuffix, reviewSuffix string
+				var extendedSuffix string
 				for _, m := range info.Matches {
 					if m.Index == cut.Index {
 						if m.IsExtended {
 							extendedSuffix = " - {edition-Extended}"
 						}
-						if m.NeedsReview {
-							reviewSuffix = " [NeedsReview]"
-						}
 						break
 					}
 				}
 
-				encodingTrackName := fmt.Sprintf("%s %s%s - %s%s", encodingTitle, yearPart, extendedSuffix, vidDef, reviewSuffix)         // The Nut Job 2 (2022) - {edition-Extended} - SD [NeedsReview]
-				encodingTrackFileName := fmt.Sprintf("%s %s%s - %s%s.mkv", encodingTitle, yearPart, extendedSuffix, vidDef, reviewSuffix) // The Nut Job 2 (2022) - {edition-Extended} - SD [NeedsReview].mkv
+				encodingTrackName := fmt.Sprintf("%s %s%s - %s", encodingTitle, yearPart, extendedSuffix, vidDef)         // The Nut Job 2 (2022) - {edition-Extended} - SD
+				encodingTrackFileName := fmt.Sprintf("%s %s%s - %s.mkv", encodingTitle, yearPart, extendedSuffix, vidDef) // The Nut Job 2 (2022) - {edition-Extended} - SD.mkv
 
 				debugLog("Cut #%d: encodingTitle='%s' yearPart='%s' imdbID='%s'", cut.Index, encodingTitle, yearPart, imdbID)
 				debugLog("Cut #%d: encodingDir: %s", cut.Index, encodingDir)
@@ -378,9 +390,72 @@ func main() {
 				debugLog("Cut #%d: DestPath: %s", cut.Index, cfg.DestPath)
 
 				expectedFile := filepath.Join(fullTempPath, encodingTrackFileName)
-				if _, err := os.Stat(expectedFile); err == nil {
-					fmt.Printf("File already exists, skipping: %s\n", expectedFile)
-					continue
+				/*
+					if _, err := os.Stat(expectedFile); err == nil {
+						fmt.Printf("File already exists, skipping: %s\n", expectedFile)
+						continue
+					}
+				*/
+
+				for {
+					if _, err := os.Stat(expectedFile); err != nil {
+						break //  file doesnt exist, proceed
+					}
+					fmt.Printf("File already exists: %s\n", encodingTrackFileName)
+					fmt.Println("[R]ename  [O]verwrite  [S]kip  (30s to skip)...")
+					keyCh := make(chan byte, 1)
+					go func() {
+						oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
+						if err != nil {
+							keyCh <- 's'
+							return
+						}
+						defer term.Restore(int(os.Stdin.Fd()), oldState)
+						var buf [1]byte
+						os.Stdin.Read(buf[:])
+						if buf[0] == 3 {
+							term.Restore(int(os.Stdin.Fd()), oldState)
+							resetScrollRegion()
+							fmt.Println("\n- Ctrl+C pressed. Cleaning up processes and exiting")
+							os.Exit(0)
+						}
+						keyCh <- buf[0]
+					}()
+
+					var action byte
+					select {
+					case action = <-keyCh:
+					case <-time.After(30 * time.Second):
+						action = 's'
+					}
+					fmt.Println()
+
+					switch action {
+					case 'r', 'R':
+						fmt.Print("Enter new filename (without extension): ")
+						reader := bufio.NewReader(os.Stdin)
+						newName, _ := reader.ReadString('\n')
+						newName = strings.TrimSpace(newName)
+						if newName != "" {
+							encodingTrackFileName = newName + ".mkv"
+							encodingTrackName = newName
+							expectedFile = filepath.Join(fullTempPath, encodingTrackFileName)
+						}
+						// loop back to re-check
+					case 'o', 'O':
+						if err := os.Remove(expectedFile); err != nil {
+							fmt.Fprintf(os.Stderr, "Failed to remove existing file: %v\n", err)
+
+						} // loop back to re-check/prompt
+					default: // 's', 'S', timeout
+						fmt.Printf("Skipping: %s\n", encodingTrackFileName)
+						goto nextCut
+					}
+
+					if _, err := os.Stat(expectedFile); err != nil {
+						break // resolved
+					}
+
 				}
 
 				titleHandle := server.Titles[cut.Index].Handle
@@ -437,9 +512,8 @@ func main() {
 					fmt.Fprintf(os.Stderr, "Rip failed for title %d: %v\n", cut.Index, ripErr)
 					continue
 				}
-
-				//MoveAndRename(fullTempPath, encNewName, encNewName, encodingDir, cfg.DestPath)
 			}
+		nextCut:
 			server.currentStage = ""
 			server.currentSource = ""
 			server.currentFile = ""

@@ -7,7 +7,6 @@ import (
 
 type Config struct {
 	DriveLetter string `json:"drive_letter"`
-	RipPath     string `json:"rip_path"`
 	DestPath    string `json:"base_path"`
 	MakeMKVPath string `json:"makemkv_path"`
 	APIKey      string `json:"api_key"`
