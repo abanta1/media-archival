@@ -115,10 +115,22 @@ func main() {
 	if !ValidatePaths(cfg) {
 	}
 
+	server, err := NewMKVServer(cfg.MakeMKVPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to start MKV server: %v\n", err)
+		os.Exit(1)
+	}
+	defer server.Close()
+
+	setScrollRegion(5)
+	stopResize := make(chan struct{})
+	go server.watchResize(stopResize)
+	defer close(stopResize)
+
 	// 1. Handle Graceful Exit (Ctrl+C)
 	setupCloseHandler()
 
-	fmt.Println("Starting MakeMKV Go-Auto...")
+	fmt.Printf("Starting MakeMKV Go-Auto...\n")
 	/*
 		handle, err := openDriveHandle(cfg.DriveLetter)
 		if err != nil {
@@ -132,15 +144,11 @@ func main() {
 		}
 	*/
 
-	server, err := NewMKVServer(cfg.MakeMKVPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to start MKV server: %v\n", err)
-		os.Exit(1)
-	}
-	defer server.Close()
-
 	// 2. Main Exec Loop
 	for {
+		_, height, _ := term.GetSize(int(os.Stdout.Fd()))
+		fmt.Printf("\033[%d;0H", height-5)
+		fmt.Printf("MakeMKV Go-Auto is Running\n")
 		if server.isDead {
 			fmt.Println("MakeMKV server connection lost. Attempting to restart...")
 			server.Close() // Clean up old process
@@ -154,19 +162,19 @@ func main() {
 		}
 
 		// Wait for disc - BDMV/VIDEO_TS on disc FS
+		server.currentStage = "Waiting for disc..."
+		server.drawStatusLines()
 		dots := []string{".   ", "..  ", "... ", "...."}
-		for i := 0; i < 10; i++ {
-			fmt.Printf("\rDetecting disc filesystem%s", dots[i%4])
-			time.Sleep(500 * time.Millisecond)
-		}
-		fmt.Printf("\rDetecting disc filesystem")
-
+		fmt.Println()
 		for i := 0; !discReady(cfg.DriveLetter); i++ {
-			fmt.Printf("\rWaiting for disc%s\033[K", dots[i%4])
+			fmt.Printf("\033[K\rWaiting for disc%s\033[K", dots[i%4])
 			time.Sleep(500 * time.Millisecond)
 		}
+		fmt.Println()
 
 		fmt.Println("\rDetected filesystem on disc - Starting workflow...")
+		server.currentStage = "Detected filesystem on disc - Starting workflow..."
+		server.drawStatusLines()
 
 		// 1. Enable Single Drive Mode. This is a boolean setting on the server.
 		if err := server.SetSingleDriveMode(true); err != nil {
@@ -177,6 +185,8 @@ func main() {
 		// 2. Trigger the initial drive enumeration.
 		// When single drive mode is enabled, the server will not spin up drives.
 		// Instead, it will enumerate them and send back an apBackReportUiDialog message.
+		server.currentStage = "Scanning Drives..."
+		server.drawStatusLines()
 		server.ScanDrives()
 
 		// 3. Poll for the server's response.
@@ -415,31 +425,39 @@ func main() {
 				fmt.Printf("Ripping track %d: %s\n", cut.Index, encodingTrackName)
 
 				server.DiscReady = false
-				setScrollRegion(4)
-				stopResize := make(chan struct{})
-				go server.watchResize(stopResize)
-
-				if err := server.SaveAllTitles(); err != nil {
-					fmt.Fprintf(os.Stderr, "Rip failed for title %d: %v\n", cut.Index, err)
-					continue
-				}
+				ripErr := server.SaveAllTitles()
 
 				// SaveAllTitles is async — poll OnIdle until LeaveJobMode sets DiscReady
 				for !server.DiscReady {
 					time.Sleep(500 * time.Millisecond)
 					server.OnIdle()
 				}
-				close(stopResize)
-				resetScrollRegion()
-				fmt.Println()
+
+				if ripErr != nil {
+					fmt.Fprintf(os.Stderr, "Rip failed for title %d: %v\n", cut.Index, ripErr)
+					continue
+				}
 
 				//MoveAndRename(fullTempPath, encNewName, encNewName, encodingDir, cfg.DestPath)
 			}
+			server.currentStage = ""
+			server.currentSource = ""
+			server.currentFile = ""
+			server.currentSize = ""
+			server.currentRate = ""
+			server.currentOutput = ""
+			server.currentOutSize = ""
+			server.currentBar = 0
+			server.totalBar = 0
+			server.drawStatusLines()
+			_, height, _ := term.GetSize(int(os.Stdout.Fd()))
+			fmt.Printf("\033[%d;0H", height-5)
 
 			ejectDrive(cfg.DriveLetter)
 			for discReady(cfg.DriveLetter) {
 				time.Sleep(500 * time.Millisecond)
 			}
+			fmt.Println()
 		}
 	}
 }
@@ -474,45 +492,10 @@ func setupCloseHandler() {
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-c
+		resetScrollRegion()
 		fmt.Println("\n- Ctrl+C pressed. Cleaning up processes and exiting")
 		os.Exit(0)
 	}()
-}
-
-func promptOptionalEditWithTimeout(label, currentValue string, timeout time.Duration) (string, bool) {
-	fmt.Printf("%s: %s\n", label, currentValue)
-	fmt.Printf("Press Enter to edit, any other key to continue (%s)...\n", timeout)
-
-	keyCh := make(chan byte, 1)
-	go func() {
-		oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
-		if err != nil {
-			keyCh <- 0
-			return
-		}
-		defer term.Restore(int(os.Stdin.Fd()), oldState)
-		var buf [1]byte
-		os.Stdin.Read(buf[:])
-		keyCh <- buf[0]
-	}()
-
-	select {
-	case key := <-keyCh:
-		fmt.Println()
-		if key == 13 {
-			fmt.Printf("Enter new value [%s]: ", currentValue)
-			reader := bufio.NewReader(os.Stdin)
-			newValue, _ := reader.ReadString('\n')
-			newValue = strings.TrimSpace(newValue)
-			if newValue != "" && newValue != currentValue {
-				return newValue, true
-			}
-		}
-	case <-time.After(timeout):
-		fmt.Println("\nContinuing...")
-	}
-
-	return currentValue, false
 }
 
 func debugLog(format string, args ...interface{}) {
@@ -592,6 +575,7 @@ func setScrollRegion(reserve int) {
 		return
 	}
 	// Set scroll region to all lines except bottom `reserve` lines
+	debugLog("setScrollRegion: height=%d reserve=%d scrollEnd=%d", height, reserve, height-reserve)
 	fmt.Printf("\033[1;%dr\033[3J", height-reserve)
 	// Clear the reserved lines
 	for i := 0; i < reserve; i++ {
@@ -606,8 +590,12 @@ func resetScrollRegion() {
 	if err != nil {
 		return
 	}
+	// Clear the scroll region
+	for i := 0; i < 5; i++ {
+		fmt.Printf("\033[%d;0H\033[K", height-4+i)
+	}
 	// Reset scroll region to full term
 	fmt.Printf("\033[1;%dr", height)
 	// Move cursor to bottomm
-	fmt.Printf("\033[%d;0H", height)
+	fmt.Printf("\033[%d;0H", height-5)
 }

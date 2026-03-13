@@ -763,17 +763,42 @@ func (s *MKVServer) drawStatusLines() {
 		}
 		return strings.Repeat("█", f) + strings.Repeat("░", barLength-f)
 	}
+	var line0 string
 	var line1 string
-	if s.isRipping {
-		line1 = fmt.Sprintf("%-40s", fmt.Sprintf("Source: %s ||| Size: %s", s.currentSource, s.currentSize))
-	} else {
-		line1 = fmt.Sprintf("%-40s", fmt.Sprintf("Source: %s ||| Cell: %s ||| VOBU: %s", s.currentSource, s.currentProgress, s.currentVobu))
+	var msgFilePath string
+	var msgFileSize string
+	if filepath.Base(s.currentOutput) != "." {
+		msgFilePath = fmt.Sprintf("||| %s", filepath.Base(s.currentOutput))
+	}
+	if s.currentOutSize != "" {
+		msgFileSize = fmt.Sprintf("Out: %s", s.currentOutSize)
 	}
 
-	line0 := fmt.Sprintf("Status: %s", s.currentStage)
-	line2 := fmt.Sprintf("[%s] %3d%%  Out: %s ||| %s", fillBar(s.currentBar), s.currentBar, s.currentOutSize, filepath.Base(s.currentOutput))
+	if s.isRipping {
+		var curSize string
+		if s.currentSize != "" && s.currentOutSize != "." {
+			curSize = "||| Size:"
+		}
+		line0 = fmt.Sprintf("Status: %s %s", s.currentStage, msgFilePath)
+		line1 = fmt.Sprintf("%-40s", fmt.Sprintf("Source: %s %s %s", s.currentSource, curSize, s.currentSize))
+	} else {
+		var msgVOBU string
+		var msgCELL string
+		if s.currentVobu != "" {
+			msgVOBU = "||| VOBU:"
+		}
+		if s.currentProgress != "" {
+			msgCELL = "||| CELL:"
+
+		}
+		line0 = fmt.Sprintf("Status: %s %s %s %s %s %s", s.currentStage, msgFilePath, msgCELL, s.currentProgress, msgVOBU, s.currentVobu)
+		line1 = fmt.Sprintf("%-40s", fmt.Sprintf("Source: %s", s.currentSource))
+	}
+
+	line2 := fmt.Sprintf("[%s] %3d%%  %s", fillBar(s.currentBar), s.currentBar, msgFileSize)
 	line3 := fmt.Sprintf("[%s] %3d%%  %s", fillBar(s.totalBar), s.totalBar, s.currentRate)
-	fmt.Printf("\033[s\033[%d;0H\033[K%s\033[%d;0H\033[K%s\033[%d;0H\033[K%s\033[%d;0H\033[K%s\033[u",
+	fmt.Printf("\033[s\033[%d;0H\033[K\033[%d;0H\033[K%s\033[%d;0H\033[K%s\033[%d;0H\033[K%s\033[%d;0H\033[K%s\033[u",
+		height-4, // blank separator
 		height-3, line0,
 		height-2, line1,
 		height-1, line2,
@@ -797,7 +822,7 @@ func (s *MKVServer) watchResize(stop <-chan struct{}) {
 			lastW, lastH = w, h
 			//Clear entire screen and re-establish scroll region
 			fmt.Printf("\033[2J")
-			setScrollRegion(4)
+			setScrollRegion(5)
 			s.drawStatusLines()
 		}
 		time.Sleep(500 * time.Millisecond)
