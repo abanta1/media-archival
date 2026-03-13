@@ -23,6 +23,8 @@ import (
 var (
 	TmdbKey         = os.Getenv("TMDB_API")
 	debugMode       bool
+	setupMode       bool
+	configSetup     bool
 	kernel32        = syscall.NewLazyDLL("kernel32.dll")
 	setTitle        = kernel32.NewProc("SetConsoleTitleW")
 	procSetTitle    = kernel32.NewProc("SetConsoleTitleW")
@@ -56,8 +58,8 @@ func main() {
 	flag.StringVar(apiKey, "K", "", "")
 	destDir := flag.String("dest", "", "")
 	flag.StringVar(destDir, "D", "", "")
-	ripDir := flag.String("rip", "", "")
-	flag.StringVar(ripDir, "R", "", "")
+	flag.BoolVar(&setupMode, "setup", false, "")
+	flag.BoolVar(&setupMode, "S", false, "")
 
 	makemkvPath := flag.String("makemkv", "", "")
 	flag.StringVar(makemkvPath, "M", "", "")
@@ -73,6 +75,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  -C, --config [string]\n\tPath to new/existing config file (default \"config.json\")\n\t"+
 			"  config file used for static/normal defaults. Flags override config.\n\t  disc drive, API key, destination dir\n\n")
 		fmt.Fprintf(os.Stderr, "  -T, --drive <driveletter:> - i.e. --drive D:\n\tSpecifies the disc drive to use\n\n")
+		fmt.Fprintf(os.Stderr, "  -S, --setup\n\tEnters config setup mode\n\n")
 		fmt.Fprintf(os.Stderr, "  -K, --apikey <key> - i.e. --apikey 123ABC\n\tSpecifies the TMDB API key to use for title matching\n\n")
 		fmt.Fprintf(os.Stderr, "  -D, --dest <dir> - i.e. --dest C:\\Path\\to\\Final\\\n\tSpecifies the path to use as the base directory for final location\n\n")
 		fmt.Fprintf(os.Stderr, "  -M, --makemkv <dir> - i.e. --dest C:\\Path\\to\\makemkvcon.exe\\\n\tSpecifies the path to use for MakeMKV binary\n\n")
@@ -80,10 +83,65 @@ func main() {
 	}
 	flag.Parse()
 
+	if setupMode {
+		fmt.Println("Entering config setup mode...")
+		configSetup = true
+	}
 	// Load config based on flag
 	var cfg Config
 	if _, err := os.Stat(*configPath); err == nil {
+		debugLog("Config file found: %s", *configPath)
 		cfg, _ = LoadConfig(*configPath)
+	} else {
+		debugLog("Config file not found: %s", *configPath)
+		fmt.Println("No config file found. Let's create one.")
+		configSetup = true
+	}
+	if configSetup {
+		reader := bufio.NewReader(os.Stdin)
+
+		fmt.Print("Drive letter (e.g. D:): ")
+		cfg.DriveLetter, _ = reader.ReadString('\n')
+		cfg.DriveLetter = strings.TrimSpace(cfg.DriveLetter)
+
+		fmt.Print("TMDB API key: ")
+		cfg.APIKey, _ = reader.ReadString('\n')
+		cfg.APIKey = strings.TrimSpace(cfg.APIKey)
+
+		fmt.Print("Destination Directory (e.g. E:\\Movies): ")
+		cfg.DestPath, _ = reader.ReadString('\n')
+		cfg.DestPath = strings.TrimSpace(cfg.DestPath)
+
+		defaultMKVPaths := []string{
+			`C:\Program Files (x86)\MakeMKV\makemkvcon64.exe`,
+			`C:\Program Files\MakeMKV\makemkvcon64.exe`,
+			`C:\Program Files (x86)\MakeMKV\makemkvcon.exe`,
+			`C:\Program Files\MakeMKV\makemkvcon.exe`,
+		}
+		cfg.MakeMKVPath = ""
+		for _, p := range defaultMKVPaths {
+			if _, err := os.Stat(p); err == nil {
+				cfg.MakeMKVPath = p
+				fmt.Printf("MakeMKV found at: %s\n", p)
+				break
+			}
+		}
+		if cfg.MakeMKVPath == "" {
+			fmt.Print("MakeMKV executable path (e.g. C:\\Program Files (x86)\\MakeMKV\\makemkvcon.exe): ")
+			cfg.MakeMKVPath, _ = reader.ReadString('\n')
+			cfg.MakeMKVPath = strings.TrimSpace(cfg.MakeMKVPath)
+		}
+
+		fmt.Print("Minimum title length in seconds (e.g. 900) for 15m: ")
+		minStr, _ := reader.ReadString('\n')
+		minStr = strings.TrimSpace(minStr)
+		fmt.Sscanf(minStr, "%d", &cfg.MinSeconds)
+
+		if err := SaveConfig(*configPath, cfg); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to save config: %v\n", err)
+		} else {
+			fmt.Printf("Config saved to %s\n", *configPath)
+		}
 	}
 
 	if *apiKey != "" {
@@ -324,22 +382,9 @@ func main() {
 			if year != "" {
 				yearPart = fmt.Sprintf("(%s)", year) // (2022)
 			}
-
-			needsReview := false
-			for _, m := range info.Matches {
-				if m.NeedsReview {
-					needsReview = true
-					break
-				}
-			}
-
-			reviewDirSuffix := ""
-			if needsReview {
-				reviewDirSuffix = " [NeedsReview]"
-			}
-			encodingDir := fmt.Sprintf("%s %s {imdb-%s}%s", encodingTitle, yearPart, imdbID, reviewDirSuffix) // The Nut Job 2 (2022) {imdb-tt123456} [NeedsReview]
-			encodingTitleName := fmt.Sprintf("%s %s", encodingTitle, yearPart)                                // The Nut Job 2 (2022)
-			fullTempPath := filepath.Join(cfg.DestPath, encodingDir)                                          // G:\makemkvcon\The Nut Job 2 (2022) {imdb-tt123456}
+			encodingDir := fmt.Sprintf("%s %s {imdb-%s}", encodingTitle, yearPart, imdbID) // The Nut Job 2 (2022) {imdb-tt123456}
+			encodingTitleName := fmt.Sprintf("%s %s", encodingTitle, yearPart)             // The Nut Job 2 (2022)
+			fullTempPath := filepath.Join(cfg.DestPath, encodingDir)                       // G:\makemkvcon\The Nut Job 2 (2022) {imdb-tt123456}
 			debugLog("Video Encoding Title: %s", encodingTitle)
 			debugLog("Video Encoding Title Name: %s", encodingTitleName)
 			debugLog("Video Encoding Dir: %s", encodingDir)
