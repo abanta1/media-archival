@@ -302,6 +302,7 @@ type MKVServer struct {
 	totalBar         int
 	isRipping        bool
 	currentStage     string
+	TargetDrive      string
 }
 
 // NewMKVServer launches makemkvcon in guiserver mode and performs the handshake
@@ -475,16 +476,37 @@ func (s *MKVServer) handleCallback(cmd uint32) (uint32, uint32) {
 		return 1, 0
 
 	case apBackReportUiDialog:
-		// Log dialog details so we can see what MakeMKV is asking
-		dialogType := s.mem.Args[0]
-		dialogID := s.mem.Args[1]
-		dialogMsg := nullTermString(s.mem.StrBuf[:])
-		debugLog("MKV dialog: type=%d id=%d msg=%q", dialogType, dialogID, dialogMsg)
-		// Repsond with button 0 (default/OK) rather than -1 (no handler),
-		// which may cause MakeMKV to cancel the job during a rip
+		dialogCode := s.mem.Args[0]
+		count := s.mem.Args[2]
+		debugLog("MKV dialog: code=%d count=%d", dialogCode, count)
+
+		// Parse the drive list and match against TargetDrive
+		// Each entry: 2-byte big-endian length, then either plain string or code (hi-bit set)
+		if s.TargetDrive != "" && count > 0 {
+			p := s.mem.StrBuf[:]
+			for i := uint32(0); i < count && i < 32; i++ {
+				hi := uint32(p[0])
+				lo := uint32(p[1])
+				p = p[2:]
+				if hi&0x80 != 0 {
+					// code entry — 2 more bytes, no string
+					p = p[2:]
+					continue
+				}
+				length := (hi << 8) | lo
+				entry := nullTermString(p[:length])
+				p = p[length:]
+				debugLog("MKV dialog entry[%d]: %q", i, entry)
+				if strings.Contains(strings.ToUpper(entry), strings.ToUpper(s.TargetDrive)) {
+					s.mem.StrBuf[0] = 0
+					s.mem.Args[0] = i + 1 // 1-based selection
+					return 1, 1
+				}
+			}
+		}
+		// Fallback: button 0 = "All Drives" (no isolation)
 		s.mem.StrBuf[0] = 0
 		s.mem.Args[0] = 0
-		//s.mem.Args[0] = 0xffffffff // -1 = no handler
 		return 1, 1
 
 	case apBackUpdateDrive:
@@ -992,7 +1014,10 @@ func (s *MKVServer) GetUiItemCode(handle uint64, attrID uint32) (uint32, error) 
 
 func parseDurationToMinutes(duration string) int {
 	// duration comes back as "h:mm:ss"" or total seconds string
-
+	var h, m, s int
+	if n, _ := fmt.Sscanf(duration, "%d:%d:%d", &h, &m, &s); n == 3 {
+		return h*60 + m
+	}
 	var secs int
 	fmt.Sscanf(duration, "%d", &secs)
 	return secs / 60

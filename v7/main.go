@@ -48,18 +48,18 @@ func main() {
 	enableANSI()
 	setConsoleTitle("MakeMKV Go-Auto")
 
-	configPath := flag.String("config", "config.json", "")
-	flag.StringVar(configPath, "C", "config.json", "")
+	configPath := flag.String("config", "", "")
+	flag.StringVar(configPath, "C", "", "")
 	flag.BoolVar(&debugMode, "debug", false, "")
 	flag.BoolVar(&debugMode, "V", false, "")
-	driveLetter := flag.String("drive", "D:", "")
-	flag.StringVar(driveLetter, "T", "D:", "")
+	driveLetter := flag.String("drive", "", "")
+	flag.StringVar(driveLetter, "T", "", "")
 	apiKey := flag.String("apikey", "", "")
 	flag.StringVar(apiKey, "K", "", "")
 	destDir := flag.String("dest", "", "")
 	flag.StringVar(destDir, "D", "", "")
-	flag.BoolVar(&setupMode, "setup", false, "")
-	flag.BoolVar(&setupMode, "S", false, "")
+	flag.BoolVar(&configSetup, "setup", false, "")
+	flag.BoolVar(&configSetup, "S", false, "")
 
 	makemkvPath := flag.String("makemkv", "", "")
 	flag.StringVar(makemkvPath, "M", "", "")
@@ -83,21 +83,74 @@ func main() {
 	}
 	flag.Parse()
 
-	if setupMode {
-		fmt.Println("Entering config setup mode...")
-		configSetup = true
-	}
-	// Load config based on flag
 	var cfg Config
-	if _, err := os.Stat(*configPath); err == nil {
-		debugLog("Config file found: %s", *configPath)
-		cfg, _ = LoadConfig(*configPath)
-	} else {
-		debugLog("Config file not found: %s", *configPath)
-		fmt.Println("No config file found. Let's create one.")
-		configSetup = true
+	var configFound bool
+
+	if configSetup || *configPath != "" {
+		// Load config based on flag
+		if _, err := os.Stat(*configPath); err == nil {
+			debugLog("Config file found: %s", *configPath)
+			fmt.Printf("Loading config from %s...\n", *configPath)
+			cfg, _ = LoadConfig(*configPath)
+			configFound = true
+		} else {
+			debugLog("Config file not found: %s", *configPath)
+			fmt.Printf("Config file not found\n")
+			configFound = false
+		}
 	}
-	if configSetup {
+
+	if *apiKey != "" {
+		cfg.APIKey = *apiKey
+		TmdbKey = *apiKey
+	} else if cfg.APIKey != "" {
+		TmdbKey = cfg.APIKey
+	}
+	if *destDir != "" {
+		cfg.DestPath = *destDir
+	}
+	if *driveLetter != "" {
+		cfg.DriveLetter = *driveLetter
+	}
+	if *makemkvPath != "" {
+		cfg.MakeMKVPath = *makemkvPath
+	}
+
+	if !configSetup && *configPath == "" && (cfg.APIKey == "" || cfg.DestPath == "" || cfg.DriveLetter == "" || cfg.MakeMKVPath == "") {
+		var missingArgs []string
+		if cfg.APIKey == "" {
+			missingArgs = append(missingArgs, "API Key")
+		}
+		if cfg.DestPath == "" {
+			missingArgs = append(missingArgs, "Destination Path")
+		}
+		if cfg.DriveLetter == "" {
+			missingArgs = append(missingArgs, "Drive Letter")
+		}
+		if cfg.MakeMKVPath == "" {
+			missingArgs = append(missingArgs, "MakeMKV Path")
+		}
+		if len(missingArgs) > 0 {
+			fmt.Println("Missing required arguments:")
+			for _, arg := range missingArgs {
+				fmt.Printf("  %s\n", arg)
+			}
+		}
+
+		fmt.Print("Would you like to create a config file [Y]/n: ")
+		reader := bufio.NewReader(os.Stdin)
+		answer, _ := reader.ReadString('\n')
+		answer = strings.TrimSpace(strings.ToLower(answer))
+
+		if answer == "" || answer == "y" {
+			configSetup = true
+		} else {
+			fmt.Println("See help `rip-auto -H` for usage information.")
+			os.Exit(0)
+		}
+	} else if configSetup || (*configPath != "" && configFound == false) {
+		fmt.Println("No config file found. Let's create one.")
+		fmt.Println("Entering config setup mode...")
 		reader := bufio.NewReader(os.Stdin)
 
 		fmt.Print("Drive letter (e.g. D:): ")
@@ -142,34 +195,15 @@ func main() {
 		} else {
 			fmt.Printf("Config saved to %s\n", *configPath)
 		}
-	}
-
-	if *apiKey != "" {
-		cfg.APIKey = *apiKey
-		TmdbKey = *apiKey
-	} else if cfg.APIKey != "" {
-		TmdbKey = cfg.APIKey
-	}
-	if *destDir != "" {
-		cfg.DestPath = *destDir
-	}
-	if *driveLetter != "" {
-		cfg.DriveLetter = *driveLetter
-	}
-	if *makemkvPath != "" {
-		cfg.MakeMKVPath = *makemkvPath
-	}
-
-	if cfg.APIKey == "" || cfg.DestPath == "" || cfg.DriveLetter == "" || cfg.MakeMKVPath == "" {
-		fmt.Fprintln(os.Stderr, "Error: API Key, Destination Dir and Drive letter are required (via flag or config).")
-		flag.Usage()
-		os.Exit(0)
+	} else {
+		fmt.Println("Proceeding with CLI flags...")
 	}
 
 	if !ValidatePaths(cfg) {
 	}
 
 	server, err := NewMKVServer(cfg.MakeMKVPath)
+	server.TargetDrive = cfg.DriveLetter
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to start MKV server: %v\n", err)
 		os.Exit(1)
@@ -231,10 +265,13 @@ func main() {
 		server.drawStatusLines()
 
 		// 1. Enable Single Drive Mode. This is a boolean setting on the server.
-		if err := server.SetSingleDriveMode(true); err != nil {
-			fmt.Printf("Failed to enable single drive mode: %v\n", err)
-			continue
-		}
+
+		/*
+			if err := server.SetSingleDriveMode(true); err != nil {
+				fmt.Printf("Failed to enable single drive mode: %v\n", err)
+				continue
+			}
+		*/
 
 		// 2. Trigger the initial drive enumeration.
 		// When single drive mode is enabled, the server will not spin up drives.
