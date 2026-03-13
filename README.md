@@ -2,6 +2,21 @@
 
 A collection of PowerShell scripts and modules used to rip, encode, and manage a personal media archive. The repository has grown over several major revisions as new workflows and helper functions were developed. Scripts range from one-off utilities for grabbing disc metadata to general purpose modules that drive long-running encoding pipelines.
 
+### MakeMKV Go-Auto
+MakeMKV Go-Auto automates disc ripping via MakeMKV's internal protocol, bypassing the CLI entirely. It detects inserted discs, scans title metadata, matches against TMDB, and rips with Plex and Jellyfin-compatible naming ({imdb-ttXXX}, {edition-Extended}) — no user interaction required after disc insert, but possible for manual review/editing.
+
+Features:
+- Protocol direct integration (no makemkvcon CLI commands)
+- TMDB lookup with runtime-based title matching
+- Automatic theatrical vs extended cut detection
+- Disc title cleaning (strips disc noise, NTFS sanitization)  
+- Optional title edit prompt with 30s timeout before TMDB search
+- NeedsReview flag for low-confidence matches
+- Live TUI progress: stage, source, bars, speed, output — fixed to terminal bottom
+- Terminal resize handled gracefully
+
+---
+
 ## 🔧 Core Dependencies (Authoritative)
 
 This is the canonical dependency list for current repository workflows (`v7-go`, `Get-DVDTitle.ps1`, and legacy module workflows).

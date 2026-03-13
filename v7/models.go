@@ -19,6 +19,7 @@ type MatchResult struct {
 	ImdbID      string
 	Method      string
 	NeedsReview bool
+	IsExtended  bool
 }
 
 type DiscInfo struct {
@@ -42,6 +43,13 @@ type TitleInfo struct {
 	Handle       uint64
 	TrackCount   uint32
 	ChapterCount uint32
+	Tracks       []TrackInfo
+}
+
+type TrackInfo struct {
+	Handle     uint64
+	Type       string
+	Resolution string
 }
 
 // GroupByMinutes - PS1= [math]::Abs($_.Minutes - $feature.Minutes) -le 5

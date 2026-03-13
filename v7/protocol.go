@@ -5,8 +5,14 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
+
+	"golang.org/x/term"
 )
 
 // ============================================================
@@ -69,7 +75,7 @@ const (
 
 // Attribute IDs from apdefs.h
 const (
-	//ap_iaType           = 1
+	ap_iaType = 1
 	ap_iaName = 2
 	//ap_iaLangCode       = 3
 	//ap_iaLangName       = 4
@@ -79,7 +85,9 @@ const (
 	ap_iaDuration     = 9
 	ap_iaDiskSize     = 10
 	//ap_iaDiskSizeBytes  = 11
+	ap_iaStreamTypeExtension = 12
 	//ap_iaSourceFileName = 16
+	ap_iaVideoSize      = 19
 	ap_iaOutputFileName = 27
 	ap_iaVolumeName     = 32
 )
@@ -123,10 +131,25 @@ const (
 )
 
 const (
-	AP_MaxCdromDevices   = 16
-	AP_Progress_MaxValue = 65536
-	apStrBufSize         = 65008
-	apArgsCount          = 32
+	AP_TTREE_VIDEO      = 6201
+	AP_TTREE_AUDIO      = 6202
+	AP_TTREE_SUBPICTURE = 6203
+)
+
+const (
+	apArgsCount           = 32
+	AP_MaxCdromDevices    = 16
+	AP_stageOpeningDisc   = 3100
+	AP_stageProcTitleSets = 3102
+	AP_stageProcTitles    = 3103
+	AP_stageDecrypting    = 3104
+	AP_stageScanContents  = 3120
+	AP_stageSavingMKV     = 5017
+	AP_stageScanDevices   = 5018
+	AP_stageRipping       = 5024
+	AP_stageAnalyzing     = 5057
+	apStrBufSize          = 65008
+	AP_Progress_MaxValue  = 65536
 )
 
 // CmdPack packs command, arg count, and data size into a single uint32
@@ -263,6 +286,22 @@ type MKVServer struct {
 	Titles           []TitleInfo
 	CollectionHandle uint64
 	DiscReady        bool
+	currentStatus    string
+	totalStatus      string
+	currentFile      string
+	currentSpeed     string
+	currentBytes     string
+	currentSource    string
+	currentSize      string
+	currentRate      string
+	currentProgress  string
+	currentVobu      string
+	currentOutput    string
+	currentOutSize   string
+	currentBar       int
+	totalBar         int
+	isRipping        bool
+	currentStage     string
 }
 
 // NewMKVServer launches makemkvcon in guiserver mode and performs the handshake
@@ -482,27 +521,93 @@ func (s *MKVServer) handleCallback(cmd uint32) (uint32, uint32) {
 		return 0, 0
 
 	case apBackUpdateCurrentBar:
-		pct := s.mem.Args[0] * 100 / AP_Progress_MaxValue
-		debugLog("MKV progress current: %d%%", pct)
+		s.currentBar = int(s.mem.Args[0] * 100 / AP_Progress_MaxValue)
+		s.drawStatusLines()
+		//debugLog("MKV progress current: %d%%", pct)
 		return 0, 0
 
 	case apBackUpdateTotalBar:
-		pct := s.mem.Args[0] * 100 / AP_Progress_MaxValue
-		debugLog("MKV progress total: %d%%", pct)
-		return 0, 0
-
-	case apBackSetTotalName:
+		s.totalBar = int(s.mem.Args[0] * 100 / AP_Progress_MaxValue)
+		s.drawStatusLines()
+		//debugLog("MKV progress total: %d%%", pct)
 		return 0, 0
 
 	case apBackUpdateLayout:
+		switch s.mem.Args[0] {
+		case AP_stageScanDevices:
+			s.currentStage = "Scanning Devices"
+		case AP_stageProcTitleSets:
+			s.currentStage = "Processing Title Sets"
+		case AP_stageProcTitles:
+			s.currentStage = "Processing Titles"
+		case AP_stageScanContents:
+			s.currentStage = "Scanning Contents"
+		case AP_stageDecrypting:
+			s.currentStage = "Decrypting"
+		case AP_stageAnalyzing:
+			s.currentStage = "Analyzing Segments"
+			s.isRipping = true
+		case AP_stageSavingMKV:
+			s.currentStage = "Saving MKV"
+			s.isRipping = true
+		default:
+			debugLog("apBackSetCurrentName unknown code/args[0]=%d", s.mem.Args[0])
+		}
+		s.drawStatusLines()
+		return 0, 0
+
+	case apBackSetTotalName:
+		switch s.mem.Args[0] {
+		case AP_stageScanDevices:
+			s.currentStage = "Scanning Devices"
+			s.isRipping = false
+		case AP_stageOpeningDisc:
+			s.currentStage = "Opening disc"
+			s.isRipping = false
+		case AP_stageRipping:
+			s.currentStage = "Ripping"
+			s.isRipping = true
+		default:
+			debugLog("apBackSetTotalName unknown code/args[0]=%d", s.mem.Args[0])
+		}
+		s.drawStatusLines()
 		return 0, 0
 
 	case apBackUpdateCurrentInfo:
+		s.currentStatus = nullTermString(s.mem.StrBuf[:])
+		val := nullTermString(s.mem.StrBuf[:])
+
+		switch s.mem.Args[0] {
+		case 0:
+			s.currentSource = val
+		case 1:
+			s.currentFile = val
+		case 2:
+			if s.isRipping {
+				s.currentSize = val
+			} else {
+				s.currentProgress = val
+			}
+		case 3:
+			if s.isRipping {
+				s.currentRate = val
+			} else {
+				s.currentVobu = val
+			}
+		case 4:
+			s.currentOutput = val
+		case 5:
+			s.currentOutSize = val
+		}
+		s.drawStatusLines()
+
+		//debugLog("apBackUpdateCurrentInfo index=%d val=%q", s.mem.Args[0], nullTermString(s.mem.StrBuf[:]))
 		//debugLog("MKV info[%d]: %s", s.mem.Args[0], nullTermString(s.mem.StrBuf[:]))
 		return 0, 0
 
 	case apBackEnterJobMode:
 		s.DiscReady = false
+		s.isRipping = false
 		debugLog("MKV enter job mode")
 		return 0, 0
 
@@ -534,7 +639,16 @@ func (s *MKVServer) handleCallback(cmd uint32) (uint32, uint32) {
 		}
 		return 0, 0
 
-	case apBackSetTrackInfo, apBackSetChapterInfo:
+	case apBackSetTrackInfo:
+		debugLog("apBackSetTrackInfo raw: args=%v", s.mem.Args[:6])
+		id := int(s.mem.Args[0])
+		handle := uint64(s.mem.Args[2]) | uint64(s.mem.Args[3])<<32
+		if id < len(s.Titles) {
+			s.Titles[id].Tracks = append(s.Titles[id].Tracks, TrackInfo{Handle: handle})
+		}
+		return 0, 0
+
+	case apBackSetChapterInfo:
 		return 0, 0
 
 	default:
@@ -628,7 +742,66 @@ func (s *MKVServer) SetTitleSelected(titleIndex int, selected bool) error {
 // SaveAllTitles rips all selected titles to MKV
 func (s *MKVServer) SaveAllTitles() error {
 	s.mem = APShmem{}
+	s.isRipping = true
 	return s.execCmd(apCallSaveAllSelectedTitlesToMkv, 0, 0)
+}
+
+func (s *MKVServer) drawStatusLines() {
+	_, height, err := term.GetSize(int(os.Stdout.Fd()))
+	if err != nil {
+		return
+	}
+
+	const barLength = 20
+	fillBar := func(pct int) string {
+		f := (pct * barLength) / 100
+		if f < 0 {
+			f = 0
+		}
+		if f > barLength {
+			f = barLength
+		}
+		return strings.Repeat("█", f) + strings.Repeat("░", barLength-f)
+	}
+	var line1 string
+	if s.isRipping {
+		line1 = fmt.Sprintf("%-40s", fmt.Sprintf("Source: %s ||| Size: %s", s.currentSource, s.currentSize))
+	} else {
+		line1 = fmt.Sprintf("%-40s", fmt.Sprintf("Source: %s ||| Cell: %s ||| VOBU: %s", s.currentSource, s.currentProgress, s.currentVobu))
+	}
+
+	line0 := fmt.Sprintf("Status: %s", s.currentStage)
+	line2 := fmt.Sprintf("[%s] %3d%%  Out: %s ||| %s", fillBar(s.currentBar), s.currentBar, s.currentOutSize, filepath.Base(s.currentOutput))
+	line3 := fmt.Sprintf("[%s] %3d%%  %s", fillBar(s.totalBar), s.totalBar, s.currentRate)
+	fmt.Printf("\033[s\033[%d;0H\033[K%s\033[%d;0H\033[K%s\033[%d;0H\033[K%s\033[%d;0H\033[K%s\033[u",
+		height-3, line0,
+		height-2, line1,
+		height-1, line2,
+		height, line3)
+}
+
+func (s *MKVServer) watchResize(stop <-chan struct{}) {
+	var lastW, lastH int
+	for {
+		select {
+		case <-stop:
+			return
+		default:
+		}
+		w, h, err := term.GetSize(int(os.Stdout.Fd()))
+		if err != nil {
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+		if w != lastW || h != lastH {
+			lastW, lastH = w, h
+			//Clear entire screen and re-establish scroll region
+			fmt.Printf("\033[2J")
+			setScrollRegion(4)
+			s.drawStatusLines()
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
 }
 
 // CloseDisk closes the current disc
@@ -677,6 +850,7 @@ func (s *MKVServer) GetUiItemInfo(handle uint64, attrID uint32) (string, error) 
 	if err := s.execCmd(apCallGetUiItemInfo, 3, 0); err != nil {
 		return "", err
 	}
+	//debugLog("GetUiItemInfo handle=%d attr=%d args[0]=%d args[1]=%d args[2]=%d", handle, attrID, s.mem.Args[0], s.mem.Args[1], s.mem.Args[2])
 	if s.mem.Args[1] == 0 {
 		return "", nil
 	}
@@ -727,22 +901,68 @@ func (s *MKVServer) ScanDisc() (DiscInfo, error) {
 		if t.Handle == 0 {
 			continue
 		}
-		name, _ := s.GetUiItemInfo(t.Handle, ap_iaName)
+		//name, _ := s.GetUiItemInfo(t.Handle, ap_iaName)
 		duration, _ := s.GetUiItemInfo(t.Handle, ap_iaDuration)
 		//fileName, _ := s.GetUiItemInfo(t.Handle, ap_iaOutputFileName)
 		fileSize, _ := s.GetUiItemInfo(t.Handle, ap_iaDiskSize)
-
 		minutes := parseDurationToMinutes(duration)
+		var (
+			vidWidth  int
+			vidHeight int
+			vidRes    string
+		)
+
+		//debugLog("Title[%d]: name=%q duration=%q size=%q", i, name, duration, fileSize)
+		//debugLog("Title[%d] track count=%d", i, len(s.Titles[i].Tracks))
+		for _, track := range s.Titles[i].Tracks {
+			if track.Handle == 0 {
+				continue
+			}
+
+			//streamType, _ := s.GetUiItemInfo(track.Handle, ap_iaStreamTypeExtension)
+			//debugLog("Title[%d] track handle=%d streamTypeExt=%q", i, track.Handle, streamType)
+
+			//trackType, _ := s.GetUiItemInfo(track.Handle, ap_iaType)
+			//debugLog("Title[%d] trackType=%s handle=%d ap_iaType raw=%q", i, trackType, track.Handle, trackType)
+
+			typeCode, _ := s.GetUiItemCode(track.Handle, ap_iaType)
+			//debugLog("Title[%d] track handle=%d typeCode=%d", i, track.Handle, typeCode)
+
+			if typeCode == AP_TTREE_VIDEO {
+				vidRes, _ = s.GetUiItemInfo(track.Handle, ap_iaVideoSize)
+				//debugLog("Title[%d] vidRes=%q", i, vidRes)
+				if parts := strings.SplitN(vidRes, "x", 2); len(parts) == 2 {
+					vidWidth, _ = strconv.Atoi(strings.TrimSpace(parts[0]))
+					vidHeight, _ = strconv.Atoi(strings.TrimSpace(parts[1]))
+					//debugLog("Title[%d] vidRes=%d", i, vidWidth)
+					//debugLog("Title[%d] vidRes=%d", i, vidHeight)
+				}
+				break
+			}
+		}
 
 		info.Features = append(info.Features, TitleMetadata{
 			Index:   i,
 			Minutes: minutes,
 			//FileName: fileName,
-			FileSize: fileSize,
+			FileSize:   fileSize,
+			Resolution: vidRes,
+			Width:      vidWidth,
+			Height:     vidHeight,
 		})
-		debugLog("Title[%d]: name=%q file=%q duration=%q size=%q", i, name /*fileName,*/, duration, fileSize)
 	}
 	return info, nil
+}
+
+func (s *MKVServer) GetUiItemCode(handle uint64, attrID uint32) (uint32, error) {
+	s.mem = APShmem{}
+	s.mem.Args[0] = uint32(handle)
+	s.mem.Args[1] = uint32(handle >> 32)
+	s.mem.Args[2] = attrID
+	if err := s.execCmd(apCallGetUiItemInfo, 3, 0); err != nil {
+		return 0, err
+	}
+	return s.mem.Args[0], nil
 }
 
 func parseDurationToMinutes(duration string) int {
