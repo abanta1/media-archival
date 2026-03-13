@@ -41,7 +41,7 @@ func InvokeMakeMKVRip(name string, args []string, exePath string) {
 			max, _ := strconv.Atoi(m[3])
 			if max > 0 {
 				pct := (cur * 100) / max
-				DrawProgressBar("Ripping: "+name, currentTitle, pct)
+				DrawProgressBar("Ripping: "+name, currentTitle, pct, 1)
 			}
 		}
 	}
