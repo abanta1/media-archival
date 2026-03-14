@@ -84,6 +84,11 @@ func main() {
 	}
 	flag.Parse()
 
+	// 1. Handle Graceful Exit (Ctrl+C)
+	setupCloseHandler()
+
+	setScrollRegion(5)
+
 	var cfg Config
 
 	defaultMKVPaths := []string{
@@ -236,28 +241,47 @@ func main() {
 	if !ValidatePaths(cfg) {
 	}
 
-	server, err := NewMKVServer(cfg.MakeMKVPath)
-	server.TargetDrive = cfg.DriveLetter
+	fmt.Printf("Starting MakeMKV Go-Auto...\n")
 
+	server, err := NewMKVServer(cfg.MakeMKVPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to start MKV server: %v\n", err)
 		os.Exit(1)
 	}
 	defer server.Close()
+	fmt.Printf("MakeMKV Go-Auto is Running\n")
 
-	setScrollRegion(5)
 	stopResize := make(chan struct{})
 	go server.watchResize(stopResize)
 	defer close(stopResize)
 
-	// 1. Handle Graceful Exit (Ctrl+C)
-	setupCloseHandler()
-
-	fmt.Printf("Starting MakeMKV Go-Auto...\n")
-	fmt.Printf("MakeMKV Go-Auto is Running\n")
+	// Trigger the initial drive enumeration.
+	server.currentStage = "Scanning Drives..."
+	server.drawStatusLines()
+	server.OnIdle()
+	server.ScanDrives()
 
 	// 2. Main Exec Loop
 	for {
+		server.TargetDrive = cfg.DriveLetter
+		// Invalidate stale drive entry before scanning
+		for i := range server.Drives {
+			if strings.Contains(strings.ToUpper(server.Drives[i].Device), strings.ToUpper(cfg.DriveLetter)) {
+				server.Drives[i].State = AP_DriveStateNoDrive
+				break
+			}
+		}
+		server.currentStage = ""
+		server.currentSource = ""
+		server.currentFile = ""
+		server.currentSize = ""
+		server.currentRate = ""
+		server.currentOutput = ""
+		server.currentOutSize = ""
+		server.currentBar = 0
+		server.totalBar = 0
+		server.drawStatusLines()
+
 		_, height, _ := term.GetSize(int(os.Stdout.Fd()))
 		fmt.Printf("\033[%d;0H", height-5)
 
@@ -266,12 +290,25 @@ func main() {
 			server.Close() // Clean up old process
 			var err error
 			server, err = NewMKVServer(cfg.MakeMKVPath)
+			server.TargetDrive = cfg.DriveLetter
+			server.ScanDrives()
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Failed to restart MKV server: %v\n", err)
 				os.Exit(1) // Or maybe sleep and retry
 			}
 			fmt.Println("MakeMKV server restarted successfully.")
 		}
+
+		server.currentStage = "Waiting for disc..."
+		server.drawStatusLines()
+		dots := []string{".   ", "..  ", "... ", "...."}
+		fmt.Println()
+		for i := 0; !discReady(cfg.DriveLetter); i++ {
+			fmt.Printf("\033[K\rWaiting for disc%s\033[K", dots[i%4])
+			time.Sleep(500 * time.Millisecond)
+			server.OnIdle()
+		}
+		fmt.Println()
 
 		// Wait for disc
 		server.currentStage = "Waiting for disc..."
@@ -280,12 +317,7 @@ func main() {
 		// Reset from prior rip
 		server.DiscReady = false
 		server.isRipping = false
-
-		// Trigger the initial drive enumeration.
-		server.currentStage = "Scanning Drives..."
-		server.drawStatusLines()
-		server.OnIdle()
-		server.ScanDrives()
+		server.UpdateDrives()
 
 		// 3. Poll for the server's response.
 		driveTimeout := time.Now().Add(15 * time.Second)
@@ -306,7 +338,7 @@ func main() {
 
 		if driveIndex == -1 {
 			server.OnIdle()
-			server.ScanDrives()
+			server.UpdateDrives()
 			continue
 		}
 
@@ -458,6 +490,11 @@ func main() {
 				continue
 			}
 
+			if err := server.SetOutputFolder(fullTempPath); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: SetOutputFolder() failed: %v\n", err)
+				continue
+			}
+
 			for _, cut := range info.DistinctCuts {
 				var vidDef string
 				switch {
@@ -566,7 +603,7 @@ func main() {
 						} // loop back to re-check/prompt
 					default: // 's', 'S', timeout
 						fmt.Printf("Skipping: %s\n", encodingTrackFileName)
-						goto nextCut
+						goto nextDisc
 					}
 
 					if _, err := os.Stat(expectedFile); err != nil {
@@ -591,7 +628,6 @@ func main() {
 						}
 					}
 				}
-
 				if err := server.SetTitleSelected(cut.Index, true); err != nil {
 					fmt.Fprintf(os.Stderr, "Error: SetTitleSelected(true) failed: %v\n", err)
 					continue
@@ -611,11 +647,6 @@ func main() {
 					//debugLog(">>> Info: Server filename %q\n", actual)
 				}
 
-				if err := server.SetOutputFolder(fullTempPath); err != nil {
-					fmt.Fprintf(os.Stderr, "Error: SetOutputFolder() failed: %v\n", err)
-					continue
-				}
-
 				fmt.Printf("Ripping track %d: %s\n", cut.Index, encodingTrackName)
 
 				server.DiscReady = false
@@ -632,33 +663,20 @@ func main() {
 					continue
 				}
 			}
-		nextCut:
-			server.currentStage = ""
-			server.currentSource = ""
-			server.currentFile = ""
-			server.currentSize = ""
-			server.currentRate = ""
-			server.currentOutput = ""
-			server.currentOutSize = ""
-			server.currentBar = 0
-			server.totalBar = 0
-			server.drawStatusLines()
+
+		nextDisc:
+
 			_, height, _ := term.GetSize(int(os.Stdout.Fd()))
 			fmt.Printf("\033[%d;0H", height-5)
 
+			server.CloseDisk()
+			server.OnIdle()
 			ejectDrive(cfg.DriveLetter)
 			for discReady(cfg.DriveLetter) {
 				time.Sleep(500 * time.Millisecond)
 				server.OnIdle()
 			}
 
-			// Invalidate stale drive entry before scanning
-			for i := range server.Drives {
-				if strings.Contains(strings.ToUpper(server.Drives[i].Device), strings.ToUpper(cfg.DriveLetter)) {
-					server.Drives[i].State = AP_DriveStateNoDrive
-					break
-				}
-			}
 			fmt.Println()
 		}
 	}
