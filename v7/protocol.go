@@ -302,6 +302,7 @@ type MKVServer struct {
 	totalBar         int
 	isRipping        bool
 	currentStage     string
+	TargetDrive      string
 }
 
 // NewMKVServer launches makemkvcon in guiserver mode and performs the handshake
@@ -360,6 +361,20 @@ func NewMKVServer(makemkvPath string) (*MKVServer, error) {
 	if err := s.execCmd(apCallGetInterfaceLanguageData, 1, 0); err != nil {
 		s.cmd.Process.Kill()
 		return nil, fmt.Errorf("GetInterfaceLanguageData init: %w", err)
+	}
+
+	// Set single-drive mode
+	s.mem = APShmem{}
+	s.mem.Args[0] = apset_io_SingleDrive
+	s.mem.Args[1] = 1
+	if err := s.execCmd(apCallSetSettingInt, 2, 0); err != nil {
+		s.cmd.Process.Kill()
+		return nil, fmt.Errorf("SetSingleDriveMode: %w", err)
+	}
+	// Persist the single-drive mode setting
+	if err := s.SaveSettings(); err != nil {
+		s.cmd.Process.Kill()
+		return nil, fmt.Errorf("SaveSettings: %w", err)
 	}
 
 	// Perform an initial drive update to populate the drive list without a hardware scan.
@@ -475,16 +490,39 @@ func (s *MKVServer) handleCallback(cmd uint32) (uint32, uint32) {
 		return 1, 0
 
 	case apBackReportUiDialog:
-		// Log dialog details so we can see what MakeMKV is asking
-		dialogType := s.mem.Args[0]
-		dialogID := s.mem.Args[1]
-		dialogMsg := nullTermString(s.mem.StrBuf[:])
-		debugLog("MKV dialog: type=%d id=%d msg=%q", dialogType, dialogID, dialogMsg)
-		// Repsond with button 0 (default/OK) rather than -1 (no handler),
-		// which may cause MakeMKV to cancel the job during a rip
+		//dialogCode := s.mem.Args[0]
+		count := s.mem.Args[2]
+		//debugLog("MKV dialog: code=%d count=%d", dialogCode, count)
+		//debugLog("s.mem.Args[1] value: %d", s.mem.Args[1])
+		// Parse the drive list and match against TargetDrive
+		// Each entry: 2-byte big-endian length, then either plain string or code (hi-bit set)
+
+		if s.TargetDrive != "" && count > 0 {
+			p := s.mem.StrBuf[:]
+			for i := uint32(0); i < count && i < 32; i++ {
+				hi := uint32(p[0])
+				lo := uint32(p[1])
+				p = p[2:]
+				if hi&0x80 != 0 {
+					// code entry — 2 more bytes, no string
+					p = p[2:]
+					continue
+				}
+				length := (hi << 8) | lo
+				entry := nullTermString(p[:length])
+				p = p[length:]
+				debugLog("MKV dialog entry[%d]: %q", i, entry)
+				if strings.Contains(strings.ToUpper(entry), strings.ToUpper(s.TargetDrive)) {
+					s.mem.StrBuf[0] = 0
+					s.mem.Args[0] = i + 1 // 1-based selection
+					return 1, 1
+				}
+			}
+		}
+
+		// Fallback: button 0 = "All Drives" (no isolation)
 		s.mem.StrBuf[0] = 0
 		s.mem.Args[0] = 0
-		//s.mem.Args[0] = 0xffffffff // -1 = no handler
 		return 1, 1
 
 	case apBackUpdateDrive:
@@ -551,7 +589,7 @@ func (s *MKVServer) handleCallback(cmd uint32) (uint32, uint32) {
 			s.currentStage = "Saving MKV"
 			s.isRipping = true
 		default:
-			debugLog("apBackSetCurrentName unknown code/args[0]=%d", s.mem.Args[0])
+			//debugLog("apBackSetCurrentName unknown code/args[0]=%d", s.mem.Args[0])
 		}
 		s.drawStatusLines()
 		return 0, 0
@@ -683,6 +721,12 @@ func (s *MKVServer) SetSingleDriveMode(enable bool) error {
 	s.mem.Args[0] = apset_io_SingleDrive
 	s.mem.Args[1] = boolToUint32(enable)
 	return s.execCmd(apCallSetSettingInt, 2, 0)
+}
+
+// Save settings
+func (s *MKVServer) SaveSettings() error {
+	s.mem = APShmem{}
+	return s.execCmd(apCallSaveSettings, 0, 0)
 }
 
 // ScanDrives enumerates drives without scanning disc content
@@ -917,6 +961,10 @@ func (s *MKVServer) ScanDisc() (DiscInfo, error) {
 	var info DiscInfo
 
 	// Get disc title from title collection handle
+	if s.CollectionHandle == 0 {
+		return DiscInfo{}, fmt.Errorf("no disc collection handle - disc not ready")
+	}
+
 	volName, err := s.GetUiItemInfo(s.CollectionHandle, ap_iaVolumeName)
 	if err == nil && volName != "" {
 		info.Title = volName
@@ -926,9 +974,8 @@ func (s *MKVServer) ScanDisc() (DiscInfo, error) {
 		if t.Handle == 0 {
 			continue
 		}
-		//name, _ := s.GetUiItemInfo(t.Handle, ap_iaName)
+
 		duration, _ := s.GetUiItemInfo(t.Handle, ap_iaDuration)
-		//fileName, _ := s.GetUiItemInfo(t.Handle, ap_iaOutputFileName)
 		fileSize, _ := s.GetUiItemInfo(t.Handle, ap_iaDiskSize)
 		minutes := parseDurationToMinutes(duration)
 		var (
@@ -937,39 +984,27 @@ func (s *MKVServer) ScanDisc() (DiscInfo, error) {
 			vidRes    string
 		)
 
-		//debugLog("Title[%d]: name=%q duration=%q size=%q", i, name, duration, fileSize)
-		//debugLog("Title[%d] track count=%d", i, len(s.Titles[i].Tracks))
 		for _, track := range s.Titles[i].Tracks {
 			if track.Handle == 0 {
 				continue
 			}
 
-			//streamType, _ := s.GetUiItemInfo(track.Handle, ap_iaStreamTypeExtension)
-			//debugLog("Title[%d] track handle=%d streamTypeExt=%q", i, track.Handle, streamType)
-
-			//trackType, _ := s.GetUiItemInfo(track.Handle, ap_iaType)
-			//debugLog("Title[%d] trackType=%s handle=%d ap_iaType raw=%q", i, trackType, track.Handle, trackType)
-
 			typeCode, _ := s.GetUiItemCode(track.Handle, ap_iaType)
-			//debugLog("Title[%d] track handle=%d typeCode=%d", i, track.Handle, typeCode)
 
 			if typeCode == AP_TTREE_VIDEO {
 				vidRes, _ = s.GetUiItemInfo(track.Handle, ap_iaVideoSize)
-				//debugLog("Title[%d] vidRes=%q", i, vidRes)
+
 				if parts := strings.SplitN(vidRes, "x", 2); len(parts) == 2 {
 					vidWidth, _ = strconv.Atoi(strings.TrimSpace(parts[0]))
 					vidHeight, _ = strconv.Atoi(strings.TrimSpace(parts[1]))
-					//debugLog("Title[%d] vidRes=%d", i, vidWidth)
-					//debugLog("Title[%d] vidRes=%d", i, vidHeight)
 				}
 				break
 			}
 		}
 
 		info.Features = append(info.Features, TitleMetadata{
-			Index:   i,
-			Minutes: minutes,
-			//FileName: fileName,
+			Index:      i,
+			Minutes:    minutes,
 			FileSize:   fileSize,
 			Resolution: vidRes,
 			Width:      vidWidth,
@@ -992,7 +1027,10 @@ func (s *MKVServer) GetUiItemCode(handle uint64, attrID uint32) (uint32, error) 
 
 func parseDurationToMinutes(duration string) int {
 	// duration comes back as "h:mm:ss"" or total seconds string
-
+	var h, m, s int
+	if n, _ := fmt.Sscanf(duration, "%d:%d:%d", &h, &m, &s); n == 3 {
+		return h*60 + m
+	}
 	var secs int
 	fmt.Sscanf(duration, "%d", &secs)
 	return secs / 60
