@@ -95,6 +95,7 @@ const (
 // Settings from apdefs.h
 const (
 	apset_io_SingleDrive                   = 23
+	apset_dvd_MinimumTitleLength    uint32 = 1
 	apset_app_DefaultOutputFileName uint32 = 40 // from ApSettingId enum (0-indexed: apset_Unknown=0...apset_app_DefaultOutputFileName=39)
 )
 
@@ -748,6 +749,15 @@ func (s *MKVServer) SetSingleDriveMode(enable bool) error {
 func (s *MKVServer) SaveSettings() error {
 	s.mem = APShmem{}
 	return s.execCmd(apCallSaveSettings, 0, 0)
+}
+
+// SetMinTitleLength sets the minimum title length in seconds.
+// Corresponds to apset_dvd_MinimumTitleLength (index 1) in the settings enum.
+func (s *MKVServer) SetMinTitleLength(seconds int) error {
+	s.mem = APShmem{}
+	s.mem.Args[0] = apset_dvd_MinimumTitleLength
+	s.mem.Args[1] = uint32(seconds)
+	return s.execCmd(apCallSetSettingInt, 2, 0)
 }
 
 // ScanDrives enumerates drives without scanning disc content

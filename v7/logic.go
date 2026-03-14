@@ -4,9 +4,24 @@ import (
 	"sort"
 )
 
-func ProcessCuts(info *DiscInfo) {
+func ProcessCuts(info *DiscInfo, minSeconds int) {
 	if len(info.Features) == 0 {
 		return
+	}
+
+	// 0. Drop titles below the minimum length before any grouping
+	if minSeconds > 0 {
+		minMinutes := minSeconds / 60
+		var filtered []TitleMetadata
+		for _, t := range info.Features {
+			if t.Minutes >= minMinutes {
+				filtered = append(filtered, t)
+			}
+		}
+		info.Features = filtered
+		if len(info.Features) == 0 {
+			return
+		}
 	}
 
 	// 1. Sort all titles by Minutes Descedning
