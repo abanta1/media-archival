@@ -694,11 +694,13 @@ func main() {
 					}
 				}
 
-				// 3. Filesystem sanity check — output file must exist and be within
-				//    ±15% of the expected size reported by makemkvcon's metadata.
-				//    Falls back to a 10 MB floor if metadata size is unavailable.
+				// 3. Filesystem sanity check — stat the filename makemkvcon actually
+				//    wrote (re-read from the server post-rip) rather than our predicted
+				//    name, so we never accidentally stat a stale leftover file.
 				if !ripFailed {
-					fi, statErr := os.Stat(expectedFile)
+					actualFileName, _ := server.GetUiItemInfo(titleHandle, ap_iaOutputFileName)
+					actualFile := filepath.Join(fullTempPath, actualFileName)
+					fi, statErr := os.Stat(actualFile)
 					if statErr != nil {
 						fmt.Fprintf(os.Stderr, "Rip output missing for title %d: %v\n", cut.Index, statErr)
 						ripFailed = true
@@ -717,7 +719,7 @@ func main() {
 						} else if actual < 10*1024*1024 {
 							fmt.Fprintf(os.Stderr,
 								"Rip output suspiciously small for title %d: %d bytes (%s)\n",
-								cut.Index, actual, expectedFile)
+								cut.Index, actual, actualFile)
 							ripFailed = true
 						}
 					}
