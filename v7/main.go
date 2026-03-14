@@ -65,6 +65,9 @@ func main() {
 	makemkvPath := flag.String("makemkv", "", "")
 	flag.StringVar(makemkvPath, "M", "", "")
 
+	minLength := flag.String("min-length", "", "")
+	flag.StringVar(minLength, "L", "", "")
+
 	flag.Usage = func() {
 		exeName := filepath.Base(os.Args[0])
 
@@ -80,6 +83,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  -K, --apikey <key> - i.e. --apikey 123ABC\n\tSpecifies the TMDB API key to use for title matching\n\n")
 		fmt.Fprintf(os.Stderr, "  -D, --dest <dir> - i.e. --dest C:\\Path\\to\\Final\\\n\tSpecifies the path to use as the base directory for final location\n\n")
 		fmt.Fprintf(os.Stderr, "  -M, --makemkv <dir> - i.e. --dest C:\\Path\\to\\makemkvcon.exe\\\n\tSpecifies the path to use for MakeMKV binary\n\n")
+		fmt.Fprintf(os.Stderr, "  -L, --min-length [900] - i.e. --min-length 300\n\tSpecifies a minimum title length in seconds (e.g. 300 = 5m). Absent this, will rip all titles\n\n")
 		//flag.PrintDefaults() // Prints alphabetically
 	}
 	flag.Parse()
@@ -139,6 +143,9 @@ func main() {
 		if *makemkvPath != "" {
 			cfg.MakeMKVPath = *makemkvPath
 		}
+	}
+	if *minLength != "" {
+		fmt.Sscanf(*minLength, "%d", &cfg.MinSeconds)
 	}
 
 	if !configSetup && *configPath == "" && (cfg.APIKey == "" || cfg.DestPath == "" || cfg.DriveLetter == "" || cfg.MakeMKVPath == "") {
@@ -250,6 +257,14 @@ func main() {
 	}
 	server.TargetDrive = cfg.DriveLetter
 	defer server.Close()
+
+	if cfg.MinSeconds > 0 {
+		if err := server.SetMinTitleLength(cfg.MinSeconds); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to set minimum title length: %v\n", err)
+		} else {
+			fmt.Printf("Minimum title length: %ds (%dm)\n", cfg.MinSeconds, cfg.MinSeconds/60)
+		}
+	}
 	fmt.Printf("MakeMKV Go-Auto is Running\n")
 
 	stopResize := make(chan struct{})
@@ -441,7 +456,7 @@ func main() {
 			close(keepalive)
 
 			fmt.Println("Processing cuts...")
-			ProcessCuts(&info)
+			ProcessCuts(&info, cfg.MinSeconds)
 
 			fmt.Println("Identifying video via TMDB...")
 			RunParallelLookups(&info, TmdbKey, userTitle)
@@ -449,16 +464,18 @@ func main() {
 			// Find theatrical runtime (shortest match)
 			theatricalMinutes := math.MaxInt32
 			for _, m := range info.Matches {
-				cut := info.DistinctCuts[m.Index]
-				if cut.Minutes < theatricalMinutes {
-					theatricalMinutes = cut.Minutes
+				for _, cut := range info.DistinctCuts {
+					if cut.Index == m.Index && cut.Minutes < theatricalMinutes {
+						theatricalMinutes = cut.Minutes
+					}
 				}
 			}
 			// Flag extended cuts
 			for i, m := range info.Matches {
-				cut := info.DistinctCuts[m.Index]
-				if cut.Minutes > theatricalMinutes {
-					info.Matches[i].IsExtended = cut.Minutes > theatricalMinutes+20
+				for _, cut := range info.DistinctCuts {
+					if cut.Index == m.Index && cut.Minutes > theatricalMinutes {
+						info.Matches[i].IsExtended = cut.Minutes > theatricalMinutes+20
+					}
 				}
 			}
 
@@ -698,7 +715,6 @@ func main() {
 								ripFailed = true
 							}
 						} else if actual < 10*1024*1024 {
-							// No metadata size available — fall back to a minimal sanity floor
 							fmt.Fprintf(os.Stderr,
 								"Rip output suspiciously small for title %d: %d bytes (%s)\n",
 								cut.Index, actual, expectedFile)
