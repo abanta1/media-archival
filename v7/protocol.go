@@ -363,6 +363,20 @@ func NewMKVServer(makemkvPath string) (*MKVServer, error) {
 		return nil, fmt.Errorf("GetInterfaceLanguageData init: %w", err)
 	}
 
+	// Set single-drive mode
+	s.mem = APShmem{}
+	s.mem.Args[0] = apset_io_SingleDrive
+	s.mem.Args[1] = 1
+	if err := s.execCmd(apCallSetSettingInt, 2, 0); err != nil {
+		s.cmd.Process.Kill()
+		return nil, fmt.Errorf("SetSingleDriveMode: %w", err)
+	}
+	// Persist the single-drive mode setting
+	if err := s.SaveSettings(); err != nil {
+		s.cmd.Process.Kill()
+		return nil, fmt.Errorf("SaveSettings: %w", err)
+	}
+
 	// Perform an initial drive update to populate the drive list without a hardware scan.
 	if err := s.UpdateDrives(); err != nil {
 		s.cmd.Process.Kill()
@@ -477,36 +491,34 @@ func (s *MKVServer) handleCallback(cmd uint32) (uint32, uint32) {
 
 	case apBackReportUiDialog:
 		//dialogCode := s.mem.Args[0]
-		//count := s.mem.Args[2]
+		count := s.mem.Args[2]
 		//debugLog("MKV dialog: code=%d count=%d", dialogCode, count)
 		//debugLog("s.mem.Args[1] value: %d", s.mem.Args[1])
 		// Parse the drive list and match against TargetDrive
 		// Each entry: 2-byte big-endian length, then either plain string or code (hi-bit set)
 
-		/*
-			if s.TargetDrive != "" && count > 0 {
-				p := s.mem.StrBuf[:]
-				for i := uint32(0); i < count && i < 32; i++ {
-					hi := uint32(p[0])
-					lo := uint32(p[1])
+		if s.TargetDrive != "" && count > 0 {
+			p := s.mem.StrBuf[:]
+			for i := uint32(0); i < count && i < 32; i++ {
+				hi := uint32(p[0])
+				lo := uint32(p[1])
+				p = p[2:]
+				if hi&0x80 != 0 {
+					// code entry — 2 more bytes, no string
 					p = p[2:]
-					if hi&0x80 != 0 {
-						// code entry — 2 more bytes, no string
-						p = p[2:]
-						continue
-					}
-					length := (hi << 8) | lo
-					entry := nullTermString(p[:length])
-					p = p[length:]
-					debugLog("MKV dialog entry[%d]: %q", i, entry)
-					if strings.Contains(strings.ToUpper(entry), strings.ToUpper(s.TargetDrive)) {
-						s.mem.StrBuf[0] = 0
-						s.mem.Args[0] = i + 1 // 1-based selection
-						return 1, 1
-					}
+					continue
+				}
+				length := (hi << 8) | lo
+				entry := nullTermString(p[:length])
+				p = p[length:]
+				debugLog("MKV dialog entry[%d]: %q", i, entry)
+				if strings.Contains(strings.ToUpper(entry), strings.ToUpper(s.TargetDrive)) {
+					s.mem.StrBuf[0] = 0
+					s.mem.Args[0] = i + 1 // 1-based selection
+					return 1, 1
 				}
 			}
-		*/
+		}
 
 		// Fallback: button 0 = "All Drives" (no isolation)
 		s.mem.StrBuf[0] = 0
@@ -709,6 +721,12 @@ func (s *MKVServer) SetSingleDriveMode(enable bool) error {
 	s.mem.Args[0] = apset_io_SingleDrive
 	s.mem.Args[1] = boolToUint32(enable)
 	return s.execCmd(apCallSetSettingInt, 2, 0)
+}
+
+// Save settings
+func (s *MKVServer) SaveSettings() error {
+	s.mem = APShmem{}
+	return s.execCmd(apCallSaveSettings, 0, 0)
 }
 
 // ScanDrives enumerates drives without scanning disc content

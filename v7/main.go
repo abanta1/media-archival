@@ -248,6 +248,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Failed to start MKV server: %v\n", err)
 		os.Exit(1)
 	}
+	server.TargetDrive = cfg.DriveLetter
 	defer server.Close()
 	fmt.Printf("MakeMKV Go-Auto is Running\n")
 
@@ -263,7 +264,6 @@ func main() {
 
 	// 2. Main Exec Loop
 	for {
-		server.TargetDrive = cfg.DriveLetter
 		// Invalidate stale drive entry before scanning
 		for i := range server.Drives {
 			if strings.Contains(strings.ToUpper(server.Drives[i].Device), strings.ToUpper(cfg.DriveLetter)) {
@@ -288,14 +288,14 @@ func main() {
 		if server.isDead {
 			fmt.Println("MakeMKV server connection lost. Attempting to restart...")
 			server.Close() // Clean up old process
-			var err error
-			server, err = NewMKVServer(cfg.MakeMKVPath)
-			server.TargetDrive = cfg.DriveLetter
-			server.ScanDrives()
+			server, err := NewMKVServer(cfg.MakeMKVPath)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Failed to restart MKV server: %v\n", err)
 				os.Exit(1) // Or maybe sleep and retry
 			}
+			server.TargetDrive = cfg.DriveLetter
+			server.ScanDrives()
+
 			fmt.Println("MakeMKV server restarted successfully.")
 		}
 
@@ -661,6 +661,8 @@ func main() {
 				if ripErr != nil {
 					fmt.Fprintf(os.Stderr, "Rip failed for title %d: %v\n", cut.Index, ripErr)
 					continue
+				} else {
+					fmt.Printf("Rip successful for title %d, %s\n", cut.Index, encodingTrackName)
 				}
 			}
 

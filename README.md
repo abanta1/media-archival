@@ -14,6 +14,7 @@ Features:
 - NeedsReview flag for low-confidence matches
 - Live TUI progress: stage, source, bars, speed, output — fixed to terminal bottom
 - Terminal resize handled gracefully
+- Multi-drive / Multi-instance Support: When multiple optical drives are attached, each instance of the tool is configured at startup to operate exclusively on its assigned drive — without interfering with one another. No seeking required.
 
 ---
 
