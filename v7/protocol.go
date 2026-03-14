@@ -81,10 +81,10 @@ const (
 	//ap_iaLangName       = 4
 	//ap_iaCodecId        = 5
 	//ap_iaCodecShort     = 6
-	ap_iaChapterCount = 8
-	ap_iaDuration     = 9
-	ap_iaDiskSize     = 10
-	//ap_iaDiskSizeBytes  = 11
+	ap_iaChapterCount        = 8
+	ap_iaDuration            = 9
+	ap_iaDiskSize            = 10
+	ap_iaDiskSizeBytes       = 11
 	ap_iaStreamTypeExtension = 12
 	//ap_iaSourceFileName = 16
 	ap_iaVideoSize      = 19
@@ -303,6 +303,10 @@ type MKVServer struct {
 	isRipping        bool
 	currentStage     string
 	TargetDrive      string
+
+	// Rip error tracking — reset by SaveAllTitles, populated by apBackReportUiMessage
+	ripReadErrors int
+	ripMessages   []string
 }
 
 // NewMKVServer launches makemkvcon in guiserver mode and performs the handshake
@@ -484,8 +488,25 @@ func (s *MKVServer) execCmd(cmd uint32, argCount uint32, dataSize uint32) error 
 func (s *MKVServer) handleCallback(cmd uint32) (uint32, uint32) {
 	switch cmd {
 	case apBackReportUiMessage:
-		//msg := nullTermString(s.mem.StrBuf[:])
-		//debugLog("MKV msg: flags=%d code=%d msg=%q", s.mem.Args[0], s.mem.Args[1], msg)
+		// Wire format: Args[0]=Code, Args[1]=Flags, strbuf=Text
+		// (matches client.cpp: ReportUiMessage(args[0], args[1], strbuf, Get64(2)))
+		code := s.mem.Args[0]
+		flags := s.mem.Args[1]
+		msg := nullTermString(s.mem.StrBuf[:])
+		debugLog("MKV msg: code=%d flags=0x%x msg=%q", code, flags, msg)
+
+		// AP_UIMSG_BOXERROR (516) is the flag combination the GUI renders as a
+		// Critical dialog — genuine blocking errors like read failures.
+		// Everything else (debug=32, hidden=64, info, skipped titles) is noise.
+		const (
+			apUimsgBoxMask  = 3854
+			apUimsgBoxError = 516
+		)
+		if flags&apUimsgBoxMask == apUimsgBoxError && msg != "" {
+			s.ripReadErrors++
+			s.ripMessages = append(s.ripMessages, msg)
+			fmt.Fprintf(os.Stderr, "\n[MakeMKV ERROR] %s\n", msg)
+		}
 		s.mem.Args[0] = 0
 		return 1, 0
 
@@ -787,7 +808,15 @@ func (s *MKVServer) SetTitleSelected(titleIndex int, selected bool) error {
 func (s *MKVServer) SaveAllTitles() error {
 	s.mem = APShmem{}
 	s.isRipping = true
+	s.ripReadErrors = 0
+	s.ripMessages = s.ripMessages[:0]
 	return s.execCmd(apCallSaveAllSelectedTitlesToMkv, 0, 0)
+}
+
+// RipHadErrors returns true if any error-flagged messages were received during the last rip.
+// makemkvcon exits 0 even on read errors, so this is the only reliable in-process signal.
+func (s *MKVServer) RipHadErrors() (bool, []string) {
+	return s.ripReadErrors > 0, s.ripMessages
 }
 
 func (s *MKVServer) drawStatusLines() {
@@ -977,6 +1006,9 @@ func (s *MKVServer) ScanDisc() (DiscInfo, error) {
 
 		duration, _ := s.GetUiItemInfo(t.Handle, ap_iaDuration)
 		fileSize, _ := s.GetUiItemInfo(t.Handle, ap_iaDiskSize)
+		fileSizeBytesStr, _ := s.GetUiItemInfo(t.Handle, ap_iaDiskSizeBytes)
+		var fileSizeBytes int64
+		fmt.Sscanf(fileSizeBytesStr, "%d", &fileSizeBytes)
 		minutes := parseDurationToMinutes(duration)
 		var (
 			vidWidth  int
@@ -1003,12 +1035,13 @@ func (s *MKVServer) ScanDisc() (DiscInfo, error) {
 		}
 
 		info.Features = append(info.Features, TitleMetadata{
-			Index:      i,
-			Minutes:    minutes,
-			FileSize:   fileSize,
-			Resolution: vidRes,
-			Width:      vidWidth,
-			Height:     vidHeight,
+			Index:         i,
+			Minutes:       minutes,
+			FileSize:      fileSize,
+			FileSizeBytes: fileSizeBytes,
+			Resolution:    vidRes,
+			Width:         vidWidth,
+			Height:        vidHeight,
 		})
 	}
 	return info, nil
