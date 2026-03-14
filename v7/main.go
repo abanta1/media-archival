@@ -309,6 +309,13 @@ func main() {
 				os.Exit(1) // Or maybe sleep and retry
 			}
 			server.TargetDrive = cfg.DriveLetter
+			if cfg.MinSeconds > 0 {
+				if err := server.SetMinTitleLength(cfg.MinSeconds); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: failed to set minimum title length: %v\n", err)
+				} else {
+					fmt.Printf("Minimum title length: %ds (%dm)\n", cfg.MinSeconds, cfg.MinSeconds/60)
+				}
+			}
 			server.ScanDrives()
 
 			fmt.Println("MakeMKV server restarted successfully.")
