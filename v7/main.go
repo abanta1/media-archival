@@ -658,12 +658,61 @@ func main() {
 					server.OnIdle()
 				}
 
+				// --- Rip validation (makemkvcon exits 0 even on read errors) ---
+				ripFailed := false
+
+				// 1. Protocol-level error (pipe died, IPC fault, etc.)
 				if ripErr != nil {
-					fmt.Fprintf(os.Stderr, "Rip failed for title %d: %v\n", cut.Index, ripErr)
-					continue
-				} else {
-					fmt.Printf("Rip successful for title %d, %s\n", cut.Index, encodingTrackName)
+					fmt.Fprintf(os.Stderr, "Rip IPC error for title %d: %v\n", cut.Index, ripErr)
+					ripFailed = true
 				}
+
+				// 2. AP_UIMSG_BOXERROR messages received during the rip — genuine errors
+				//    the GUI would have shown as a Critical dialog (read failures, etc.).
+				//    Warning only: makemkvcon often recovers, so the size check is the gate.
+				if hadErr, msgs := server.RipHadErrors(); hadErr {
+					fmt.Fprintf(os.Stderr, "WARNING: Rip reported %d error(s) for title %d (validating output size):\n", len(msgs), cut.Index)
+					for _, m := range msgs {
+						fmt.Fprintf(os.Stderr, "  • %s\n", m)
+					}
+				}
+
+				// 3. Filesystem sanity check — output file must exist and be within
+				//    ±15% of the expected size reported by makemkvcon's metadata.
+				//    Falls back to a 10 MB floor if metadata size is unavailable.
+				if !ripFailed {
+					fi, statErr := os.Stat(expectedFile)
+					if statErr != nil {
+						fmt.Fprintf(os.Stderr, "Rip output missing for title %d: %v\n", cut.Index, statErr)
+						ripFailed = true
+					} else {
+						actual := fi.Size()
+						expected := cut.FileSizeBytes
+						if expected > 0 {
+							lo := int64(float64(expected) * 0.85)
+							hi := int64(float64(expected) * 1.15)
+							if actual < lo || actual > hi {
+								fmt.Fprintf(os.Stderr,
+									"Rip output size out of range for title %d: got %d bytes, expected %d ±15%% (%d–%d)\n",
+									cut.Index, actual, expected, lo, hi)
+								ripFailed = true
+							}
+						} else if actual < 10*1024*1024 {
+							// No metadata size available — fall back to a minimal sanity floor
+							fmt.Fprintf(os.Stderr,
+								"Rip output suspiciously small for title %d: %d bytes (%s)\n",
+								cut.Index, actual, expectedFile)
+							ripFailed = true
+						}
+					}
+				}
+
+				if ripFailed {
+					fmt.Fprintf(os.Stderr, "Rip FAILED for title %d: %s — skipping move\n", cut.Index, encodingTrackName)
+					continue
+				}
+
+				fmt.Printf("Rip successful for title %d, %s\n", cut.Index, encodingTrackName)
 			}
 
 		nextDisc:

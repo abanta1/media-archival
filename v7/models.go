@@ -3,13 +3,14 @@ package main
 import "math"
 
 type TitleMetadata struct {
-	Index      int
-	Minutes    int
-	Resolution string
-	Width      int
-	Height     int
-	FileName   string
-	FileSize   string
+	Index         int
+	Minutes       int
+	Resolution    string
+	Width         int
+	Height        int
+	FileName      string
+	FileSize      string
+	FileSizeBytes int64
 }
 
 type MatchResult struct {
