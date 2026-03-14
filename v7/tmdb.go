@@ -42,7 +42,7 @@ func SearchMovieMatch(title string, runtime int, apiKey string) (*TMDBResult, st
 	// Check top 5 results for runtime match
 	for _, movie := range searchResp.Results[:min(5, len(searchResp.Results))] {
 		// Get full details for runtime
-		debugLog("Fetching details for '%s' (id=%d), runtime=%d", movie.Title, movie.ID, movie.Runtime)
+		debugLog("Fetching details for '%s' (id=%d)", movie.Title, movie.ID)
 		details, err := fetchMovieDetails(movie.ID, apiKey)
 		if err != nil {
 			continue
