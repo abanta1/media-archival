@@ -16,6 +16,17 @@ Features:
 - Terminal resize handled gracefully
 - Multi-drive / Multi-instance Support: When multiple optical drives are attached, each instance of the tool is configured at startup to operate exclusively on its assigned drive — without interfering with one another. No seeking required.
 
+This implementation has been refactored into a modular, decoupled architecture. This improves maintainability and supports the project's guiding principles of clean separation of concerns.
+
+Project Structure (MakeMKV Go-Auto)
+
+The Go implementation is now organized into specialized internal packages:
+  -  mkv: Handles the MakeMKV protocol, hardware interaction, and disc status.
+  -  tmdb: Manages all external API communication and metadata lookups.
+  -  ui: A dedicated terminal interface package for progress bars and resize handling.
+  -  models: Centralized data structures to ensure type safety and prevent import cycles.
+  -  config: Validates application settings and directory paths.
+
 ---
 
 ## 🔧 Core Dependencies (Authoritative)
@@ -119,11 +130,19 @@ The scripts assume a Windows environment with the following installed:
 ```bash
 # Build
 cd v7-go
-go build -o ripper.exe .
+go build -o ./cmd/ripper.exe
+```
 
-# Run
+```bash
+# Run with CLI args
 ./ripper.exe -T D: -R G:\ripdir -D G:\FinalDir -M "C:\Program Files (x86)\MakeMKV\makemkvcon64.exe" -K YOUR_TMDB_KEY
 ```
+or
+```bash
+# Run with config
+./ripper.exe -T D: -C config.json
+```
+
 
 ### Get disc information, match to TMDb, rip and name (PowerShell) (v6 and prior)
 
