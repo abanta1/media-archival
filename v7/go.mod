@@ -1,4 +1,4 @@
-module makemkv-auto
+module media-archival/v7
 
 go 1.25.0
 

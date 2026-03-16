@@ -1,14 +1,15 @@
-package main
+package mkv
 
 import (
 	"bufio"
+	"media-archival/v7/internal/models"
 	"regexp"
 	"strconv"
 	"strings"
 )
 
-func ParseMakeMKVOutput(scanner *bufio.Scanner) DiscInfo {
-	var info DiscInfo
+func ParseMakeMKVOutput(scanner *bufio.Scanner) models.DiscInfo {
+	var info models.DiscInfo
 
 	// Pre-Compile regex for speed
 	reCInfo := regexp.MustCompile(`^CINFO:2,0,"(.*)"`)
@@ -43,7 +44,7 @@ func ParseMakeMKVOutput(scanner *bufio.Scanner) DiscInfo {
 			hrs, _ := strconv.Atoi(m[2])
 			mins, _ := strconv.Atoi(m[3])
 
-			title := TitleMetadata{
+			title := models.TitleMetadata{
 				Index:   idx,
 				Minutes: (hrs * 60) + mins,
 			}
