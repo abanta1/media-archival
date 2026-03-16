@@ -6,6 +6,13 @@ import (
 	"flag"
 	"fmt"
 	"math"
+	"media-archival/v7/internal/config"
+	log "media-archival/v7/internal/logger"
+	"media-archival/v7/internal/mkv"
+	"media-archival/v7/internal/models"
+	"media-archival/v7/internal/processor"
+	tmdb "media-archival/v7/internal/tmdb"
+	"media-archival/v7/internal/ui"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -92,9 +99,9 @@ func main() {
 	// 1. Handle Graceful Exit (Ctrl+C)
 	setupCloseHandler()
 
-	setScrollRegion(5)
+	ui.SetScrollRegion(5)
 
-	var cfg Config
+	var cfg config.Config
 
 	defaultMKVPaths := []string{
 		`C:\Program Files (x86)\MakeMKV\makemkvcon64.exe`,
@@ -109,12 +116,12 @@ func main() {
 	if configSetup || *configPath != "" {
 		// Load config based on flag
 		if _, err := os.Stat(*configPath); err == nil {
-			debugLog("Config file found: %s", *configPath)
+			log.DebugLog("Config file found: %s", *configPath)
 			fmt.Printf("Loading config from %s...\n", *configPath)
-			cfg, _ = LoadConfig(*configPath)
+			cfg, _ = config.LoadConfig(*configPath)
 			configFound = true
 		} else {
-			debugLog("Config file not found: %s", *configPath)
+			log.DebugLog("Config file not found: %s", *configPath)
 			fmt.Printf("Config file not found\n")
 			configFound = false
 		}
@@ -171,25 +178,8 @@ func main() {
 		}
 
 		fmt.Print("Would you like to create a config file [Y]/n: ")
-		keyCh := make(chan byte, 1)
-		go func() {
-			oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
-			if err != nil {
-				keyCh <- 0
-				return
-			}
-			defer term.Restore(int(os.Stdin.Fd()), oldState)
-			var buf [1]byte
-			os.Stdin.Read(buf[:])
-			if buf[0] == 3 {
-				if oldState != nil {
-					term.Restore(int(os.Stdin.Fd()), oldState)
-				}
-				fmt.Println("\n- Ctrl+C pressed. Cleaning up processes and exiting")
-				os.Exit(0)
-			}
-			keyCh <- buf[0]
-		}()
+
+		keyCh, oldState := inputLoop()
 
 		var key byte
 		select {
@@ -197,6 +187,9 @@ func main() {
 		case <-time.After(30 * time.Second):
 			fmt.Println("\nTimeout reached. Defaulting to 'n'.")
 			key = 'n'
+			if oldState != nil {
+				term.Restore(int(os.Stdin.Fd()), oldState)
+			}
 			select {
 			case <-keyCh:
 			default:
@@ -250,7 +243,7 @@ func main() {
 		minStr = strings.TrimSpace(minStr)
 		fmt.Sscanf(minStr, "%d", &cfg.MinSeconds)
 
-		if err := SaveConfig(*configPath, cfg); err != nil {
+		if err := config.SaveConfig(*configPath, cfg); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to save config: %v\n", err)
 		} else {
 			fmt.Printf("Config saved to %s\n", *configPath)
@@ -259,12 +252,12 @@ func main() {
 		fmt.Println("Proceeding with CLI flags...")
 	}
 
-	if !ValidatePaths(cfg) {
+	if !config.ValidatePaths(cfg) {
 	}
 
 	fmt.Printf("Starting MakeMKV Go-Auto...\n")
 
-	server, err := NewMKVServer(cfg.MakeMKVPath)
+	server, err := mkv.NewMKVServer(cfg.MakeMKVPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to start MKV server: %v\n", err)
 		os.Exit(1)
@@ -282,12 +275,12 @@ func main() {
 	fmt.Printf("MakeMKV Go-Auto is Running\n")
 
 	stopResize := make(chan struct{})
-	go server.watchResize(stopResize)
+	go server.WatchResize(stopResize)
 	defer close(stopResize)
 
 	// Trigger the initial drive enumeration.
-	server.currentStage = "Scanning Drives..."
-	server.drawStatusLines()
+	server.CurrentStage = "Scanning Drives..."
+	server.DrawStatusLines()
 	server.OnIdle()
 	server.ScanDrives()
 
@@ -296,28 +289,28 @@ func main() {
 		// Invalidate stale drive entry before scanning
 		for i := range server.Drives {
 			if strings.Contains(strings.ToUpper(server.Drives[i].Device), strings.ToUpper(cfg.DriveLetter)) {
-				server.Drives[i].State = AP_DriveStateNoDrive
+				server.Drives[i].State = mkv.AP_DriveStateNoDrive
 				break
 			}
 		}
-		server.currentStage = ""
-		server.currentSource = ""
-		server.currentFile = ""
-		server.currentSize = ""
-		server.currentRate = ""
-		server.currentOutput = ""
-		server.currentOutSize = ""
-		server.currentBar = 0
-		server.totalBar = 0
-		server.drawStatusLines()
+		server.CurrentStage = ""
+		server.CurrentSource = ""
+		server.CurrentFile = ""
+		server.CurrentSize = ""
+		server.CurrentRate = ""
+		server.CurrentOutput = ""
+		server.CurrentOutSize = ""
+		server.CurrentBar = 0
+		server.TotalBar = 0
+		server.DrawStatusLines()
 
 		_, height, _ := term.GetSize(int(os.Stdout.Fd()))
 		fmt.Printf("\033[%d;0H", height-5)
 
-		if server.isDead {
+		if server.IsDead {
 			fmt.Println("MakeMKV server connection lost. Attempting to restart...")
 			server.Close() // Clean up old process
-			server, err := NewMKVServer(cfg.MakeMKVPath)
+			server, err := mkv.NewMKVServer(cfg.MakeMKVPath)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Failed to restart MKV server: %v\n", err)
 				os.Exit(1) // Or maybe sleep and retry
@@ -335,11 +328,11 @@ func main() {
 			fmt.Println("MakeMKV server restarted successfully.")
 		}
 
-		server.currentStage = "Waiting for disc..."
-		server.drawStatusLines()
+		server.CurrentStage = "Waiting for disc..."
+		server.DrawStatusLines()
 		dots := []string{".   ", "..  ", "... ", "...."}
 		fmt.Println()
-		for i := 0; !discReady(cfg.DriveLetter); i++ {
+		for i := 0; !mkv.DiscReady(cfg.DriveLetter); i++ {
 			fmt.Printf("\033[K\rWaiting for disc%s\033[K", dots[i%4])
 			time.Sleep(500 * time.Millisecond)
 			server.OnIdle()
@@ -347,12 +340,12 @@ func main() {
 		fmt.Println()
 
 		// Wait for disc
-		server.currentStage = "Waiting for disc..."
-		server.drawStatusLines()
+		server.CurrentStage = "Waiting for disc..."
+		server.DrawStatusLines()
 
 		// Reset from prior rip
 		server.DiscReady = false
-		server.isRipping = false
+		server.IsRipping = false
 		server.UpdateDrives()
 
 		// 3. Poll for the server's response.
@@ -365,7 +358,7 @@ func main() {
 
 			for _, d := range server.Drives {
 				if strings.Contains(strings.ToUpper(d.Device), strings.ToUpper(cfg.DriveLetter)) &&
-					d.State != AP_DriveStateNoDrive { // Find the first valid entry for our drive
+					d.State != mkv.AP_DriveStateNoDrive { // Find the first valid entry for our drive
 					driveIndex = d.Index
 					break
 				}
@@ -381,8 +374,8 @@ func main() {
 		// At this point, the GUI would show a dialog. Since this is an automation tool,
 		// we already know which drive we want. We now tell the server to open that specific drive by its index.
 		// This is the action that will cause the single, selected drive to spin up.
-		debugLog("Opening disc by index: %d", driveIndex)
-		debugLog("Pre-scan: CollectionHandle=%d TitleCount=%d", server.CollectionHandle, server.TitleCount)
+		log.DebugLog("Opening disc by index: %d", driveIndex)
+		log.DebugLog("Pre-scan: CollectionHandle=%d TitleCount=%d", server.CollectionHandle, server.TitleCount)
 		if err := server.OpenCdDisk(uint32(driveIndex)); err != nil {
 			fmt.Printf("Failed to open disc by index: %v\n", err)
 			continue
@@ -392,10 +385,10 @@ func main() {
 		// We wait for the apBackLeaveJobMode callback, which sets DiscReady to true.
 
 		//fmt.Printf("Drive Index: %d\n", driveIndex)
-		debugLog("Drive Index: %d\n", driveIndex)
+		log.DebugLog("Drive Index: %d\n", driveIndex)
 		//fmt.Println("Scanning Disc Info...")
 
-		debugLog("Opening disc: driveIndex=%d, drive device=%q label=%q state=%d", driveIndex, server.Drives[driveIndex].Device, server.Drives[driveIndex].Label, server.Drives[driveIndex].State)
+		log.DebugLog("Opening disc: driveIndex=%d, drive device=%q label=%q state=%d", driveIndex, server.Drives[driveIndex].Device, server.Drives[driveIndex].Label, server.Drives[driveIndex].State)
 
 		fmt.Println("Waiting for disc scan...")
 		deadline := time.Now().Add(240 * time.Second)
@@ -411,9 +404,9 @@ func main() {
 		info, err := server.ScanDisc()
 		if err != nil {
 			fmt.Printf("Failed to scan disc: %v\n", err)
-			debugLog("Drive Index %d", driveIndex)
-			debugLog("Drive state %d", server.Drives[driveIndex].State)
-			debugLog("server.DiscReady: %b", server.DiscReady)
+			log.DebugLog("Drive Index %d", driveIndex)
+			log.DebugLog("Drive state %d", server.Drives[driveIndex].State)
+			log.DebugLog("server.DiscReady: %b", server.DiscReady)
 			continue
 		}
 
@@ -428,28 +421,7 @@ func main() {
 			start, stopKeepalive := context.WithCancel(context.Background())
 			serverKeepalive(start, server)
 
-			keyCh := make(chan byte, 1)
-			var oldState *term.State
-			var err error
-			go func() {
-				oldState, err = term.MakeRaw(int(os.Stdin.Fd()))
-				if err != nil {
-					keyCh <- 0
-					return
-				}
-				defer term.Restore(int(os.Stdin.Fd()), oldState)
-				var buf [1]byte
-				os.Stdin.Read(buf[:])
-				if buf[0] == 3 {
-					if oldState != nil {
-						term.Restore(int(os.Stdin.Fd()), oldState)
-					}
-					resetScrollRegion()
-					fmt.Println("\n- Ctrl+C pressed. Cleaning up processes and exiting")
-					os.Exit(0)
-				}
-				keyCh <- buf[0]
-			}()
+			keyCh, oldState := inputLoop()
 
 			userTitle := cleanTitle
 			select {
@@ -477,7 +449,7 @@ func main() {
 			}
 
 			fmt.Println("Processing cuts...")
-			ProcessCuts(&info, cfg.MinSeconds)
+			processor.ProcessCuts(&info, cfg.MinSeconds)
 
 			fmt.Println("Identifying video via TMDB...")
 			RunParallelLookups(&info, TmdbKey, userTitle)
@@ -519,10 +491,10 @@ func main() {
 			encodingDir := fmt.Sprintf("%s %s {imdb-%s}", encodingTitle, yearPart, imdbID) // The Nut Job 2 (2022) {imdb-tt123456}
 			encodingTitleName := fmt.Sprintf("%s %s", encodingTitle, yearPart)             // The Nut Job 2 (2022)
 			fullTempPath := filepath.Join(cfg.DestPath, encodingDir)                       // G:\makemkvcon\The Nut Job 2 (2022) {imdb-tt123456}
-			debugLog("Video Encoding Title: %s", encodingTitle)
-			debugLog("Video Encoding Title Name: %s", encodingTitleName)
-			debugLog("Video Encoding Dir: %s", encodingDir)
-			debugLog("Video Temp path: %s", fullTempPath)
+			log.DebugLog("Video Encoding Title: %s", encodingTitle)
+			log.DebugLog("Video Encoding Title Name: %s", encodingTitleName)
+			log.DebugLog("Video Encoding Dir: %s", encodingDir)
+			log.DebugLog("Video Temp path: %s", fullTempPath)
 			if err := os.MkdirAll(fullTempPath, 0755); err != nil {
 				fmt.Fprintf(os.Stderr, "Failed to create temp directory %q: %v\n", fullTempPath, err)
 				continue
@@ -561,17 +533,17 @@ func main() {
 				encodingTrackName := fmt.Sprintf("%s %s%s - %s", encodingTitle, yearPart, extendedSuffix, vidDef)         // The Nut Job 2 (2022) - {edition-Extended} - SD
 				encodingTrackFileName := fmt.Sprintf("%s %s%s - %s.mkv", encodingTitle, yearPart, extendedSuffix, vidDef) // The Nut Job 2 (2022) - {edition-Extended} - SD.mkv
 
-				debugLog("Cut #%d: encodingTitle='%s' yearPart='%s' imdbID='%s'", cut.Index, encodingTitle, yearPart, imdbID)
-				debugLog("Cut #%d: encodingDir: %s", cut.Index, encodingDir)
-				debugLog("Cut #%d: origName: %s", cut.Index, cut.FileName)
-				debugLog("Cut #%d: newFileName: %s", cut.Index, encodingTrackFileName)
-				debugLog("Cut #%d: definition: %s", cut.Index, vidDef)
-				debugLog("Cut #%d: resolution: %s", cut.Index, cut.Resolution)
-				debugLog("Cut #%d: width: %d", cut.Index, cut.Width)
-				debugLog("Cut #%d: height: %d", cut.Index, cut.Height)
-				debugLog("Cut #%d: fileSize: %s", cut.Index, cut.FileSize)
-				debugLog("Cut #%d: fullTempPath: %s", cut.Index, fullTempPath)
-				debugLog("Cut #%d: DestPath: %s", cut.Index, cfg.DestPath)
+				log.DebugLog("Cut #%d: encodingTitle='%s' yearPart='%s' imdbID='%s'", cut.Index, encodingTitle, yearPart, imdbID)
+				log.DebugLog("Cut #%d: encodingDir: %s", cut.Index, encodingDir)
+				log.DebugLog("Cut #%d: origName: %s", cut.Index, cut.FileName)
+				log.DebugLog("Cut #%d: newFileName: %s", cut.Index, encodingTrackFileName)
+				log.DebugLog("Cut #%d: definition: %s", cut.Index, vidDef)
+				log.DebugLog("Cut #%d: resolution: %s", cut.Index, cut.Resolution)
+				log.DebugLog("Cut #%d: width: %d", cut.Index, cut.Width)
+				log.DebugLog("Cut #%d: height: %d", cut.Index, cut.Height)
+				log.DebugLog("Cut #%d: fileSize: %s", cut.Index, cut.FileSize)
+				log.DebugLog("Cut #%d: fullTempPath: %s", cut.Index, fullTempPath)
+				log.DebugLog("Cut #%d: DestPath: %s", cut.Index, cfg.DestPath)
 
 				expectedFile := filepath.Join(fullTempPath, encodingTrackFileName)
 
@@ -586,26 +558,7 @@ func main() {
 					start, stopKeepalive := context.WithCancel(context.Background())
 					serverKeepalive(start, server)
 
-					keyCh := make(chan byte, 1)
-					go func() {
-						oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
-						if err != nil {
-							keyCh <- 's'
-							return
-						}
-						defer term.Restore(int(os.Stdin.Fd()), oldState)
-						var buf [1]byte
-						os.Stdin.Read(buf[:])
-						if buf[0] == 3 {
-							if oldState != nil {
-								term.Restore(int(os.Stdin.Fd()), oldState)
-							}
-							resetScrollRegion()
-							fmt.Println("\n- Ctrl+C pressed. Cleaning up processes and exiting")
-							os.Exit(0)
-						}
-						keyCh <- buf[0]
-					}()
+					keyCh, oldState := inputLoop()
 
 					var action byte
 					select {
@@ -661,7 +614,7 @@ func main() {
 				for i, t := range server.Titles {
 					if t.Handle != 0 {
 						if err := server.SetTitleSelected(i, false); err != nil {
-							debugLog("SetTitleSelected(false) failed for handle %d: %v", i, err)
+							log.DebugLog("SetTitleSelected(false) failed for handle %d: %v", i, err)
 						}
 					}
 				}
@@ -671,17 +624,18 @@ func main() {
 				}
 
 				if err := server.SetDefaultOutputFileName(encodingTrackName); err != nil {
-					debugLog("SetDefaultOutputFileName failed: %v", err)
+					log.DebugLog("SetDefaultOutputFileName failed: %v", err)
 				} else {
-					debugLog("SetDefaultOutputFileName success")
+					log.DebugLog("SetDefaultOutputFileName success")
 				}
 
 				// Verify the name was actually accepted
-				if actual, err := server.GetUiItemInfo(titleHandle, ap_iaOutputFileName); err == nil {
+				outputFileNameKey := mkv.GetOutputFileNameKey()
+				if actual, err := server.GetUiItemInfo(titleHandle, outputFileNameKey); err == nil {
 					if actual != encodingTrackFileName {
 						fmt.Fprintf(os.Stderr, "Warning: MakeMKV rejected filename %q, will rip as %q\n", encodingTrackFileName, actual)
 					}
-					//debugLog(">>> Info: Server filename %q\n", actual)
+					//log.DebugLog(">>> Info: Server filename %q\n", actual)
 				}
 
 				fmt.Printf("Ripping track %d: %s\n", cut.Index, encodingTrackName)
@@ -718,7 +672,7 @@ func main() {
 				//    wrote (re-read from the server post-rip) rather than our predicted
 				//    name, so we never accidentally stat a stale leftover file.
 				if !ripFailed {
-					actualFileName, _ := server.GetUiItemInfo(titleHandle, ap_iaOutputFileName)
+					actualFileName, _ := server.GetUiItemInfo(titleHandle, outputFileNameKey)
 					actualFile := filepath.Join(fullTempPath, actualFileName)
 					fi, statErr := os.Stat(actualFile)
 					if statErr != nil {
@@ -760,8 +714,8 @@ func main() {
 
 			server.CloseDisk()
 			server.OnIdle()
-			ejectDrive(cfg.DriveLetter)
-			for discReady(cfg.DriveLetter) {
+			mkv.EjectDrive(cfg.DriveLetter)
+			for mkv.DiscReady(cfg.DriveLetter) {
 				time.Sleep(500 * time.Millisecond)
 				server.OnIdle()
 			}
@@ -771,7 +725,7 @@ func main() {
 	}
 }
 
-func serverKeepalive(ctx context.Context, server *MKVServer) {
+func serverKeepalive(ctx context.Context, server *mkv.MKVServer) {
 	go func() {
 		ticker := time.NewTicker(500 * time.Millisecond)
 		defer ticker.Stop()
@@ -816,38 +770,10 @@ func setupCloseHandler() {
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-c
-		resetScrollRegion()
+		ui.ResetScrollRegion()
 		fmt.Println("\n- Ctrl+C pressed. Cleaning up processes and exiting")
 		os.Exit(0)
 	}()
-}
-
-func debugLog(format string, args ...interface{}) {
-	if debugMode {
-		fmt.Printf("[DEBUG] "+format+"\n", args...)
-	}
-}
-
-func discReady(letter string) bool {
-	// Try to open key files to ensure filesystem is responsive, like in the PowerShell script.
-	ifoPath := filepath.Join(letter, "VIDEO_TS", "VIDEO_TS.IFO")
-	if f, err := os.Open(ifoPath); err == nil {
-		f.Close()
-		debugLog("\ndiscReady: Found and opened %s", ifoPath)
-		return true
-	}
-
-	bdmvPath := filepath.Join(letter, "BDMV", "index.bdmv")
-	if f, err := os.Open(bdmvPath); err == nil {
-		f.Close()
-		debugLog("discReady: Found and opened %s", bdmvPath)
-		return true
-	}
-
-	// Fallback for discs that might not have those exact files but are ready.
-	_, errIFO := os.Stat(filepath.Join(letter, "VIDEO_TS"))
-	_, errBDMV := os.Stat(filepath.Join(letter, "BDMV"))
-	return errIFO == nil || errBDMV == nil
 }
 
 func userConfirmed() bool {
@@ -856,17 +782,41 @@ func userConfirmed() bool {
 	return strings.ToLower(strings.TrimSpace(text)) == "y"
 }
 
-func RunParallelLookups(info *DiscInfo, apiKey string, userTitle string) {
+func inputLoop() (chan byte, *term.State) {
+	keyCh := make(chan byte, 1)
+	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
+	go func() {
+		if err != nil {
+			keyCh <- 0
+			return
+		}
+		defer term.Restore(int(os.Stdin.Fd()), oldState)
+		var buf [1]byte
+		os.Stdin.Read(buf[:])
+		if buf[0] == 3 {
+			if oldState != nil {
+				term.Restore(int(os.Stdin.Fd()), oldState)
+			}
+			ui.ResetScrollRegion()
+			fmt.Println("\n- Ctrl+C pressed. Cleaning up processes and exiting")
+			os.Exit(0)
+		}
+		keyCh <- buf[0]
+	}()
+	return keyCh, oldState
+}
+
+func RunParallelLookups(info *models.DiscInfo, apiKey string, userTitle string) {
 	var wg sync.WaitGroup
 	// Mutex to safely write to the slice from multiple goroutines
 	var mu sync.Mutex
 
 	for _, cut := range info.DistinctCuts {
 		wg.Add(1)
-		go func(c TitleMetadata) {
+		go func(c models.TitleMetadata) {
 			defer wg.Done()
 
-			match, method := SearchMovieMatch(userTitle, c.Minutes, apiKey)
+			match, method := tmdb.SearchMovieMatch(userTitle, c.Minutes, apiKey)
 
 			mu.Lock()
 			if match != nil {
@@ -874,7 +824,7 @@ func RunParallelLookups(info *DiscInfo, apiKey string, userTitle string) {
 				if len(match.ReleaseDate) >= 4 {
 					year = match.ReleaseDate[:4]
 				}
-				info.Matches = append(info.Matches, MatchResult{
+				info.Matches = append(info.Matches, models.MatchResult{
 					Index:       c.Index,
 					Title:       match.Title,
 					Year:        year,
@@ -891,35 +841,4 @@ func RunParallelLookups(info *DiscInfo, apiKey string, userTitle string) {
 		}(cut)
 	}
 	wg.Wait()
-}
-
-func setScrollRegion(reserve int) {
-	_, height, err := term.GetSize(int(os.Stdout.Fd()))
-	if err != nil {
-		return
-	}
-	// Set scroll region to all lines except bottom `reserve` lines
-	debugLog("setScrollRegion: height=%d reserve=%d scrollEnd=%d", height, reserve, height-reserve)
-	fmt.Printf("\033[1;%dr\033[3J", height-reserve)
-	// Clear the reserved lines
-	for i := 0; i < reserve; i++ {
-		fmt.Printf("\033[%d;0H\033[K", height-reserve+1+i)
-	}
-	// Move cursor back to top of scroll region
-	fmt.Printf("\033[%d;0H", height-reserve)
-}
-
-func resetScrollRegion() {
-	_, height, err := term.GetSize(int(os.Stdout.Fd()))
-	if err != nil {
-		return
-	}
-	// Clear the scroll region
-	for i := 0; i < 5; i++ {
-		fmt.Printf("\033[%d;0H\033[K", height-4+i)
-	}
-	// Reset scroll region to full term
-	fmt.Printf("\033[1;%dr", height)
-	// Move cursor to bottomm
-	fmt.Printf("\033[%d;0H", height-5)
 }

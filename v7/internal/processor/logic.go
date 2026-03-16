@@ -1,10 +1,11 @@
-package main
+package processor
 
 import (
+	"media-archival/v7/internal/models"
 	"sort"
 )
 
-func ProcessCuts(info *DiscInfo, minSeconds int) {
+func ProcessCuts(info *models.DiscInfo, minSeconds int) {
 	if len(info.Features) == 0 {
 		return
 	}
@@ -12,7 +13,7 @@ func ProcessCuts(info *DiscInfo, minSeconds int) {
 	// 0. Drop titles below the minimum length before any grouping
 	if minSeconds > 0 {
 		minMinutes := minSeconds / 60
-		var filtered []TitleMetadata
+		var filtered []models.TitleMetadata
 		for _, t := range info.Features {
 			if t.Minutes >= minMinutes {
 				filtered = append(filtered, t)
@@ -33,8 +34,8 @@ func ProcessCuts(info *DiscInfo, minSeconds int) {
 	variance := 20
 	dupThreshold := 5
 
-	var mainFeatures []TitleMetadata
-	var extras []TitleMetadata
+	var mainFeatures []models.TitleMetadata
+	var extras []models.TitleMetadata
 
 	// 2. Separate Main Features from Extras
 	for _, t := range info.Features {
@@ -48,7 +49,7 @@ func ProcessCuts(info *DiscInfo, minSeconds int) {
 	// 3. Identify Distinct Cuts (Theatrical vs Extended)
 	// Use map to track which indices already 'grouped'
 	assigned := make(map[int]bool)
-	var distinct []TitleMetadata
+	var distinct []models.TitleMetadata
 
 	for _, f := range mainFeatures {
 		if assigned[f.Index] {
@@ -57,7 +58,7 @@ func ProcessCuts(info *DiscInfo, minSeconds int) {
 
 		// Find others within the 5-min dup threshold
 		for _, other := range mainFeatures {
-			if !assigned[other.Index] && IsDuplicate(f.Minutes, other.Minutes, dupThreshold) {
+			if !assigned[other.Index] && models.IsDuplicate(f.Minutes, other.Minutes, dupThreshold) {
 				assigned[other.Index] = true
 			}
 		}

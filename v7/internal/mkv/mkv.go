@@ -1,16 +1,22 @@
-package main
+package mkv
 
 import (
 	"bufio"
 	"bytes"
 	"fmt"
+	log "media-archival/v7/internal/logger"
+	"media-archival/v7/internal/ui"
+
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"golang.org/x/sys/windows"
+	"golang.org/x/term"
 )
 
 const IOCTL_STORAGE_EJECT_MEDIA = 0x2D4808
@@ -41,13 +47,37 @@ func InvokeMakeMKVRip(name string, args []string, exePath string) {
 			max, _ := strconv.Atoi(m[3])
 			if max > 0 {
 				pct := (cur * 100) / max
-				DrawProgressBar("Ripping: "+name, currentTitle, pct, 1)
+				ui.DrawProgressBar("Ripping: "+name, currentTitle, pct, 1)
 			}
 		}
 	}
 
 	cmd.Wait()
 	fmt.Println("\nRip Complete.")
+}
+
+func (s *MKVServer) WatchResize(stop <-chan struct{}) {
+	var lastW, lastH int
+	for {
+		select {
+		case <-stop:
+			return
+		default:
+		}
+		w, h, err := term.GetSize(int(os.Stdout.Fd()))
+		if err != nil {
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+		if w != lastW || h != lastH {
+			lastW, lastH = w, h
+			//Clear entire screen and re-establish scroll region
+			fmt.Printf("\033[2J")
+			ui.SetScrollRegion(5)
+			s.DrawStatusLines()
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
 }
 
 /*func runMetadataScan(index string, exePath string) DiscInfo {
@@ -67,6 +97,28 @@ func InvokeMakeMKVRip(name string, args []string, exePath string) {
 	cmd.Process.Kill()
 	return info
 }*/
+
+func DiscReady(letter string) bool {
+	// Try to open key files to ensure filesystem is responsive, like in the PowerShell script.
+	ifoPath := filepath.Join(letter, "VIDEO_TS", "VIDEO_TS.IFO")
+	if f, err := os.Open(ifoPath); err == nil {
+		f.Close()
+		log.DebugLog("\ndiscReady: Found and opened %s", ifoPath)
+		return true
+	}
+
+	bdmvPath := filepath.Join(letter, "BDMV", "index.bdmv")
+	if f, err := os.Open(bdmvPath); err == nil {
+		f.Close()
+		log.DebugLog("discReady: Found and opened %s", bdmvPath)
+		return true
+	}
+
+	// Fallback for discs that might not have those exact files but are ready.
+	_, errIFO := os.Stat(filepath.Join(letter, "VIDEO_TS"))
+	_, errBDMV := os.Stat(filepath.Join(letter, "BDMV"))
+	return errIFO == nil || errBDMV == nil
+}
 
 // replaces runMetadataScan
 func (s *MKVServer) OpenDisc(driveIndex int) error {
@@ -105,7 +157,7 @@ func openDriveHandle(driveLetter string) (windows.Handle, error) {
 	return handle, nil
 }
 
-func ejectDrive(letter string) {
+func EjectDrive(letter string) {
 	fmt.Printf("Ejecting drive %s...\n", letter)
 	drivePath := fmt.Sprintf(`\\.\%s`, strings.TrimSuffix(letter, "\\"))
 
@@ -127,7 +179,7 @@ func ejectDrive(letter string) {
 	var bytesReturned uint32
 	windows.DeviceIoControl(h, IOCTL_STORAGE_EJECT_MEDIA, nil, 0, nil, 0, &bytesReturned, nil)
 	fmt.Printf("Waiting for disc removal...\n")
-	for discReady(letter) {
+	for DiscReady(letter) {
 		time.Sleep(500 * time.Millisecond)
 	}
 	fmt.Printf("Disc removed.\n")
