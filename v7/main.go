@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"flag"
 	"fmt"
 	"math"
@@ -181,14 +182,26 @@ func main() {
 			var buf [1]byte
 			os.Stdin.Read(buf[:])
 			if buf[0] == 3 {
-				term.Restore(int(os.Stdin.Fd()), oldState)
+				if oldState != nil {
+					term.Restore(int(os.Stdin.Fd()), oldState)
+				}
 				fmt.Println("\n- Ctrl+C pressed. Cleaning up processes and exiting")
 				os.Exit(0)
 			}
 			keyCh <- buf[0]
 		}()
 
-		key := <-keyCh
+		var key byte
+		select {
+		case key = <-keyCh:
+		case <-time.After(30 * time.Second):
+			fmt.Println("\nTimeout reached. Defaulting to 'n'.")
+			key = 'n'
+			select {
+			case <-keyCh:
+			default:
+			}
+		}
 		key = byte(unicode.ToLower(rune(key)))
 
 		switch key {
@@ -201,6 +214,7 @@ func main() {
 			fmt.Println("\nInvalid key. Expected Y or N.")
 			os.Exit(1)
 		}
+
 	} else if configSetup || (*configPath != "" && configFound == false) {
 		fmt.Println("No config file found. Let's create one.")
 		fmt.Println("Entering config setup mode...")
@@ -411,23 +425,14 @@ func main() {
 			fmt.Println("Press Enter to edit, any other key to continue (30s)...")
 
 			// Keepalive during user input
-			keepalive := make(chan struct{})
-			go func() {
-				ticker := time.NewTicker(60 * time.Second)
-				defer ticker.Stop()
-				for {
-					select {
-					case <-ticker.C:
-						server.OnIdle()
-					case <-keepalive:
-						return
-					}
-				}
-			}()
+			start, stopKeepalive := context.WithCancel(context.Background())
+			serverKeepalive(start, server)
 
 			keyCh := make(chan byte, 1)
+			var oldState *term.State
+			var err error
 			go func() {
-				oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
+				oldState, err = term.MakeRaw(int(os.Stdin.Fd()))
 				if err != nil {
 					keyCh <- 0
 					return
@@ -436,7 +441,9 @@ func main() {
 				var buf [1]byte
 				os.Stdin.Read(buf[:])
 				if buf[0] == 3 {
-					term.Restore(int(os.Stdin.Fd()), oldState)
+					if oldState != nil {
+						term.Restore(int(os.Stdin.Fd()), oldState)
+					}
 					resetScrollRegion()
 					fmt.Println("\n- Ctrl+C pressed. Cleaning up processes and exiting")
 					os.Exit(0)
@@ -458,9 +465,16 @@ func main() {
 					}
 				}
 			case <-time.After(30 * time.Second):
+				if oldState != nil {
+					term.Restore(int(os.Stdin.Fd()), oldState)
+				}
 				fmt.Println("\nContinuing...")
 			}
-			close(keepalive)
+			stopKeepalive()
+			select {
+			case <-keyCh:
+			default:
+			}
 
 			fmt.Println("Processing cuts...")
 			ProcessCuts(&info, cfg.MinSeconds)
@@ -567,20 +581,11 @@ func main() {
 					}
 					fmt.Printf("File already exists: %s\n", encodingTrackFileName)
 					fmt.Println("[R]ename  [O]verwrite  [S]kip  (30s to skip)...")
+
 					// Keepalive during user input
-					keepalive := make(chan struct{})
-					go func() {
-						ticker := time.NewTicker(60 * time.Second)
-						defer ticker.Stop()
-						for {
-							select {
-							case <-ticker.C:
-								server.OnIdle()
-							case <-keepalive:
-								return
-							}
-						}
-					}()
+					start, stopKeepalive := context.WithCancel(context.Background())
+					serverKeepalive(start, server)
+
 					keyCh := make(chan byte, 1)
 					go func() {
 						oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
@@ -592,7 +597,9 @@ func main() {
 						var buf [1]byte
 						os.Stdin.Read(buf[:])
 						if buf[0] == 3 {
-							term.Restore(int(os.Stdin.Fd()), oldState)
+							if oldState != nil {
+								term.Restore(int(os.Stdin.Fd()), oldState)
+							}
 							resetScrollRegion()
 							fmt.Println("\n- Ctrl+C pressed. Cleaning up processes and exiting")
 							os.Exit(0)
@@ -604,9 +611,17 @@ func main() {
 					select {
 					case action = <-keyCh:
 					case <-time.After(30 * time.Second):
+						if oldState != nil {
+							term.Restore(int(os.Stdin.Fd()), oldState)
+						}
 						action = 's'
 					}
 					fmt.Println()
+
+					select {
+					case <-keyCh:
+					default:
+					}
 
 					switch action {
 					case 'r', 'R':
@@ -633,9 +648,7 @@ func main() {
 					if _, err := os.Stat(expectedFile); err != nil {
 						break // resolved
 					}
-
-					close(keepalive)
-
+					stopKeepalive()
 				}
 
 				titleHandle := server.Titles[cut.Index].Handle
@@ -756,6 +769,21 @@ func main() {
 			fmt.Println()
 		}
 	}
+}
+
+func serverKeepalive(ctx context.Context, server *MKVServer) {
+	go func() {
+		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				server.OnIdle()
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
 }
 
 func CleanTitle(s string) string {
