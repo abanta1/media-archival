@@ -53,7 +53,7 @@ func InvokeMakeMKVRip(name string, args []string, exePath string) {
 	}
 
 	cmd.Wait()
-	fmt.Println("\nRip Complete.")
+	log.Log(5, "Rip Complete.")
 }
 
 func (s *MKVServer) WatchResize(stop <-chan struct{}) {
@@ -85,7 +85,7 @@ func (s *MKVServer) WatchResize(stop <-chan struct{}) {
 	cmd := exec.Command(exePath, "-r", "info", "disc:"+index)
 	stdout, _ := cmd.StdoutPipe()
 	if err := cmd.Start(); err != nil {
-		fmt.Printf("Failed to start makemkvcon: %v\n", err)
+		log.Log(3, "Failed to start makemkvcon: %v\n", err)
 		return DiscInfo{}
 	}
 	cmd.Start()
@@ -98,20 +98,37 @@ func (s *MKVServer) WatchResize(stop <-chan struct{}) {
 	return info
 }*/
 
+// Try to open key files to ensure filesystem is responsive, like in the PowerShell script.
 func DiscReady(letter string) bool {
-	// Try to open key files to ensure filesystem is responsive, like in the PowerShell script.
+	// 1. Force an OS hardware query to 'wake' drive
+	pathStr := filepath.VolumeName(letter) + "\\"
+	log.Log(7, "Querying Path: [%s]", pathStr)
+	path, _ := windows.UTF16PtrFromString(filepath.VolumeName(letter) + "\\")
+
+	if err := windows.GetVolumeInformation(path, nil, 0, nil, nil, nil, nil, 0); err != nil {
+		log.Log(4, "OS cannot talk to hardware %s", err)
+		return false // OS cant talk to hardware yet
+	} else {
+		log.Log(7, "OS can talk to hardware")
+	}
+
+	// 2. Verify disc is video disc
 	ifoPath := filepath.Join(letter, "VIDEO_TS", "VIDEO_TS.IFO")
 	if f, err := os.Open(ifoPath); err == nil {
 		f.Close()
-		log.DebugLog("\ndiscReady: Found and opened %s", ifoPath)
+		log.Log(7, "DiscReady: Found and opened %s", ifoPath)
 		return true
+	} else {
+		log.Log(4, "DiscReady: DVD Error: %s", err)
 	}
 
 	bdmvPath := filepath.Join(letter, "BDMV", "index.bdmv")
 	if f, err := os.Open(bdmvPath); err == nil {
 		f.Close()
-		log.DebugLog("discReady: Found and opened %s", bdmvPath)
+		log.Log(7, "discReady: Found and opened %s", bdmvPath)
 		return true
+	} else {
+		log.Log(4, "mkv.DiscReady BD Error: %s", err)
 	}
 
 	// Fallback for discs that might not have those exact files but are ready.
@@ -158,7 +175,7 @@ func openDriveHandle(driveLetter string) (windows.Handle, error) {
 }
 
 func EjectDrive(letter string) {
-	fmt.Printf("Ejecting drive %s...\n", letter)
+	log.Log(5, "Ejecting drive %s...\n", letter)
 	drivePath := fmt.Sprintf(`\\.\%s`, strings.TrimSuffix(letter, "\\"))
 
 	h, err := windows.CreateFile(
@@ -171,18 +188,18 @@ func EjectDrive(letter string) {
 		0,
 	)
 	if err != nil {
-		fmt.Printf("Failed to open drive: %v\n", err)
+		log.Log(3, "Failed to open drive: %v\n", err)
 		return
 	}
 	defer windows.CloseHandle(h)
 
 	var bytesReturned uint32
 	windows.DeviceIoControl(h, IOCTL_STORAGE_EJECT_MEDIA, nil, 0, nil, 0, &bytesReturned, nil)
-	fmt.Printf("Waiting for disc removal...\n")
+	log.Log(5, "Waiting for disc removal...\n")
 	for DiscReady(letter) {
 		time.Sleep(500 * time.Millisecond)
 	}
-	fmt.Printf("Disc removed.\n")
+	log.Log(5, "Disc removed.\n")
 }
 
 func GetDriveIndex(targetLetter string, exePath string) (string, error) {

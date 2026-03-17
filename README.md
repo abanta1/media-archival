@@ -18,7 +18,22 @@ Features:
 
 This implementation has been refactored into a modular, decoupled architecture. This improves maintainability and supports the project's guiding principles of clean separation of concerns.
 
-Project Structure (MakeMKV Go-Auto)
+#### Logging and Debugging
+
+This utility uses a syslog-aligned logging system to control output verbosity. You can set the log level using the -V or --log-level flags.
+
+##### Log Levels
+| Level | Name | Description |
+| ----- | ---- | ----------- |
+| -1 | Quiet | (Default) Minimal UI output and critical status only. |
+| 0-3 | Error/Warning | Only displays critical failures and alerts. |
+| 4-5 | Info/Notice | Standard operational messages and configuration status. |
+| 6 | Informational | Detailed steps (e.g., disc scanning and file selection). |
+| 7 | Debug | Full IPC traces and TMDB lookup details. |
+
+---
+
+#### 📦 Project Structure (MakeMKV Go-Auto)
 
 The Go implementation is now organized into specialized internal packages:
   -  mkv: Handles the MakeMKV protocol, hardware interaction, and disc status.
