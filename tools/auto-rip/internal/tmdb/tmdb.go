@@ -25,7 +25,7 @@ type TMDBResponse struct {
 func SearchMovieMatch(title string, runtime int, apiKey string) (*TMDBResult, string) {
 	encodedTitle := url.QueryEscape(title)
 	searchURL := fmt.Sprintf("https://api.themoviedb.org/3/search/movie?api_key=%s&query=%s", apiKey, encodedTitle)
-	log.DebugLog("TMDB search URL: %s", searchURL)
+	log.Log(7, "TMDB search URL: %s", searchURL)
 
 	resp, err := http.Get(searchURL)
 	if err != nil {
@@ -35,7 +35,7 @@ func SearchMovieMatch(title string, runtime int, apiKey string) (*TMDBResult, st
 
 	var searchResp TMDBResponse
 	json.NewDecoder(resp.Body).Decode(&searchResp)
-	log.DebugLog("TMDB search results: %d", len(searchResp.Results))
+	log.Log(7, "TMDB search results: %d", len(searchResp.Results))
 
 	if len(searchResp.Results) == 0 {
 		return nil, "No Match"
@@ -44,14 +44,14 @@ func SearchMovieMatch(title string, runtime int, apiKey string) (*TMDBResult, st
 	// Check top 5 results for runtime match
 	for _, movie := range searchResp.Results[:min(5, len(searchResp.Results))] {
 		// Get full details for runtime
-		log.DebugLog("Fetching details for '%s' (id=%d)", movie.Title, movie.ID)
+		log.Log(7, "Fetching details for '%s' (id=%d)", movie.Title, movie.ID)
 		details, err := fetchMovieDetails(movie.ID, apiKey)
 		if err != nil {
 			continue
 		}
 
 		diff := mathAbs(runtime - details.Runtime)
-		log.DebugLog("  '%s' runtime=%d diff=%d", details.Title, details.Runtime, diff)
+		log.Log(7, "  '%s' runtime=%d diff=%d", details.Title, details.Runtime, diff)
 
 		if diff <= 2 {
 			return details, "Runtime Match"

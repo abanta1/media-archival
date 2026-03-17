@@ -245,7 +245,7 @@ func recvCmd(r io.Reader, mem *APShmem) error {
 	if end > 16 {
 		end = 16
 	}
-	//log.DebugLog("recvCmd raw[0:%d]: % x", end, buf[:end])
+	log.Log(7, "recvCmd raw[0:%d]: % x", end, buf[:end])
 
 	cmd := binary.LittleEndian.Uint32(buf[0:])
 	argCount := (cmd >> 16) & 0xff
@@ -337,7 +337,7 @@ func NewMKVServer(makemkvPath string) (*MKVServer, error) {
 	go func() {
 		scanner := bufio.NewScanner(s.stderr)
 		for scanner.Scan() {
-			log.DebugLog("makemkvcon stderr: %s", scanner.Text())
+			log.Log(7, "makemkvcon stderr: %s", scanner.Text())
 		}
 	}()
 
@@ -345,7 +345,7 @@ func NewMKVServer(makemkvPath string) (*MKVServer, error) {
 		s.cmd.Process.Kill()
 		return nil, fmt.Errorf("handshake: %w", err)
 	}
-	log.DebugLog("MKVServer: guiserver started, handshake complete")
+	log.Log(7, "MKVServer: guiserver started, handshake complete")
 
 	// Required init sequence before UpdateDrives will fire apBackUpdateDrive callbacks.
 	// Mirrors AppGetInterfaceLanguageData() in lstring.cpp called by main.cpp after Init().
@@ -413,7 +413,7 @@ func (s *MKVServer) handshake() error {
 	}
 
 	resp := response.String()
-	log.DebugLog("MKVServer version string: %q", resp)
+	log.Log(7, "MKVServer version string: %q", resp)
 
 	// Step 2: validate
 	if !strings.HasPrefix(resp, AP_ABI_VER+":") {
@@ -435,7 +435,7 @@ func (s *MKVServer) handshake() error {
 		return fmt.Errorf("write 0xbb: %w", err)
 	}
 
-	log.DebugLog("MKVServer handshake complete")
+	log.Log(7, "MKVServer handshake complete")
 	return nil
 }
 
@@ -446,14 +446,14 @@ func (s *MKVServer) transact() error {
 	}
 	if err := sendCmd(s.stdin, &s.mem); err != nil {
 		if strings.Contains(err.Error(), "pipe is being closed") {
-			log.DebugLog("transact: detected dead pipe on send")
+			log.Log(7, "transact: detected dead pipe on send")
 			s.IsDead = true
 		}
 		return fmt.Errorf("send: %w", err)
 	}
 	if err := recvCmd(s.stdout, &s.mem); err != nil {
 		if err == io.EOF || strings.Contains(err.Error(), "pipe is being closed") {
-			log.DebugLog("transact: detected dead pipe on recv")
+			log.Log(7, "transact: detected dead pipe on recv")
 			s.IsDead = true
 		}
 		return fmt.Errorf("recv: %w", err)
@@ -471,14 +471,14 @@ func (s *MKVServer) execCmd(cmd uint32, argCount uint32, dataSize uint32) error 
 		}
 
 		recvCmdVal, _, _ := CmdUnpack(s.mem.Cmd)
-		//log.DebugLog("execCmd recv: cmd=0x%x (%d)", recvCmdVal, recvCmdVal)
+		log.Log(7, "execCmd recv: cmd=0x%x (%d)", recvCmdVal, recvCmdVal)
 		if recvCmdVal == apReturn {
 			return nil
 		}
 
 		// Handle callback then reply with apClientDone
 		if recvCmdVal != apBackUpdateCurrentBar && recvCmdVal != apBackUpdateTotalBar {
-			//log.DebugLog("execCmd callback: cmd=%d (0x%x)", recvCmdVal, recvCmdVal)
+			log.Log(7, "execCmd callback: cmd=%d (0x%x)", recvCmdVal, recvCmdVal)
 		}
 		replyArgs, replyData := s.handleCallback(recvCmdVal)
 		s.mem.Cmd = CmdPack(apClientDone, replyArgs, replyData)
@@ -495,7 +495,7 @@ func (s *MKVServer) handleCallback(cmd uint32) (uint32, uint32) {
 		code := s.mem.Args[0]
 		flags := s.mem.Args[1]
 		msg := nullTermString(s.mem.StrBuf[:])
-		log.DebugLog("MKV msg: code=%d flags=0x%x msg=%q", code, flags, msg)
+		log.Log(7, "MKV msg: code=%d flags=0x%x msg=%q", code, flags, msg)
 
 		// AP_UIMSG_BOXERROR (516) is the flag combination the GUI renders as a
 		// Critical dialog — genuine blocking errors like read failures.
@@ -507,16 +507,16 @@ func (s *MKVServer) handleCallback(cmd uint32) (uint32, uint32) {
 		if flags&apUimsgBoxMask == apUimsgBoxError && msg != "" {
 			s.ripReadErrors++
 			s.ripMessages = append(s.ripMessages, msg)
-			fmt.Fprintf(os.Stderr, "\n[MakeMKV ERROR] %s\n", msg)
+			log.Log(2, "\n[MakeMKV] %s\n", msg)
 		}
 		s.mem.Args[0] = 0
 		return 1, 0
 
 	case apBackReportUiDialog:
-		//dialogCode := s.mem.Args[0]
+		dialogCode := s.mem.Args[0]
 		count := s.mem.Args[2]
-		//log.DebugLog("MKV dialog: code=%d count=%d", dialogCode, count)
-		//log.DebugLog("s.mem.Args[1] value: %d", s.mem.Args[1])
+		log.Log(7, "MKV dialog: code=%d count=%d", dialogCode, count)
+		log.Log(7, "s.mem.Args[1] value: %d", s.mem.Args[1])
 		// Parse the drive list and match against TargetDrive
 		// Each entry: 2-byte big-endian length, then either plain string or code (hi-bit set)
 
@@ -534,7 +534,7 @@ func (s *MKVServer) handleCallback(cmd uint32) (uint32, uint32) {
 				length := (hi << 8) | lo
 				entry := nullTermString(p[:length])
 				p = p[length:]
-				log.DebugLog("MKV dialog entry[%d]: %q", i, entry)
+				log.Log(7, "MKV dialog entry[%d]: %q", i, entry)
 				if strings.Contains(strings.ToUpper(entry), strings.ToUpper(s.TargetDrive)) {
 					s.mem.StrBuf[0] = 0
 					s.mem.Args[0] = i + 1 // 1-based selection
@@ -549,7 +549,7 @@ func (s *MKVServer) handleCallback(cmd uint32) (uint32, uint32) {
 		return 1, 1
 
 	case apBackUpdateDrive:
-		//log.DebugLog("apBackUpdateDrive raw: args=%v", s.mem.Args[:5])
+		log.Log(7, "apBackUpdateDrive raw: args=%v", s.mem.Args[:5])
 		idx := int(s.mem.Args[0])
 		state := s.mem.Args[2]
 		fsFlags := s.mem.Args[3]
@@ -568,7 +568,7 @@ func (s *MKVServer) handleCallback(cmd uint32) (uint32, uint32) {
 		if s.mem.Args[1]&4 != 0 {
 			devName = nullTermString(p)
 		}
-		//log.DebugLog("apBackUpdateDrive callback: index=%d state=%d label=%q device=%q drvName=%q", idx, state, dskName, devName, drvName)
+		log.Log(7, "apBackUpdateDrive callback: index=%d state=%d label=%q device=%q drvName=%q", idx, state, dskName, devName, drvName)
 		if idx < AP_MaxCdromDevices {
 			s.Drives[idx] = models.DriveInfo{
 				Index:   idx,
@@ -577,20 +577,20 @@ func (s *MKVServer) handleCallback(cmd uint32) (uint32, uint32) {
 				Label:   dskName,
 				Device:  devName,
 			}
-			//log.DebugLog("MKV drive update: index=%d state=%d label=%q device=%q", idx, state, dskName, devName)
+			log.Log(7, "MKV drive update: index=%d state=%d label=%q device=%q", idx, state, dskName, devName)
 		}
 		return 0, 0
 
 	case apBackUpdateCurrentBar:
 		s.CurrentBar = int(s.mem.Args[0] * 100 / AP_Progress_MaxValue)
 		s.DrawStatusLines()
-		//log.DebugLog("MKV progress current: %d%%", pct)
+		log.Log(7, "MKV progress current: %d%%", s.CurrentBar)
 		return 0, 0
 
 	case apBackUpdateTotalBar:
 		s.TotalBar = int(s.mem.Args[0] * 100 / AP_Progress_MaxValue)
 		s.DrawStatusLines()
-		//log.DebugLog("MKV progress total: %d%%", pct)
+		log.Log(7, "MKV progress total: %d%%", s.CurrentBar)
 		return 0, 0
 
 	case apBackUpdateLayout:
@@ -612,7 +612,7 @@ func (s *MKVServer) handleCallback(cmd uint32) (uint32, uint32) {
 			s.CurrentStage = "Saving MKV"
 			s.IsRipping = true
 		default:
-			//log.DebugLog("apBackSetCurrentName unknown code/args[0]=%d", s.mem.Args[0])
+			log.Log(7, "apBackSetCurrentName unknown code/args[0]=%d", s.mem.Args[0])
 		}
 		s.DrawStatusLines()
 		return 0, 0
@@ -629,7 +629,7 @@ func (s *MKVServer) handleCallback(cmd uint32) (uint32, uint32) {
 			s.CurrentStage = "Ripping"
 			s.IsRipping = true
 		default:
-			log.DebugLog("apBackSetTotalName unknown code/args[0]=%d", s.mem.Args[0])
+			log.Log(7, "apBackSetTotalName unknown code/args[0]=%d", s.mem.Args[0])
 		}
 		s.DrawStatusLines()
 		return 0, 0
@@ -662,23 +662,23 @@ func (s *MKVServer) handleCallback(cmd uint32) (uint32, uint32) {
 		}
 		s.DrawStatusLines()
 
-		//log.DebugLog("apBackUpdateCurrentInfo index=%d val=%q", s.mem.Args[0], nullTermString(s.mem.StrBuf[:]))
-		//log.DebugLog("MKV info[%d]: %s", s.mem.Args[0], nullTermString(s.mem.StrBuf[:]))
+		log.Log(7, "apBackUpdateCurrentInfo index=%d val=%q", s.mem.Args[0], nullTermString(s.mem.StrBuf[:]))
+		log.Log(7, "MKV info[%d]: %s", s.mem.Args[0], nullTermString(s.mem.StrBuf[:]))
 		return 0, 0
 
 	case apBackEnterJobMode:
 		s.DiscReady = false
 		s.IsRipping = false
-		log.DebugLog("MKV enter job mode")
+		log.Log(7, "MKV enter job mode")
 		return 0, 0
 
 	case apBackLeaveJobMode:
 		s.DiscReady = true
-		log.DebugLog("MKV leave job mode")
+		log.Log(7, "MKV leave job mode")
 		return 0, 0
 
 	case apBackExit:
-		log.DebugLog("MKV exit signal received")
+		log.Log(7, "MKV exit signal received")
 		return 0, 0
 
 	case apBackSetTitleCollInfo:
@@ -701,7 +701,7 @@ func (s *MKVServer) handleCallback(cmd uint32) (uint32, uint32) {
 		return 0, 0
 
 	case apBackSetTrackInfo:
-		log.DebugLog("apBackSetTrackInfo raw: args=%v", s.mem.Args[:6])
+		log.Log(7, "apBackSetTrackInfo raw: args=%v", s.mem.Args[:6])
 		id := int(s.mem.Args[0])
 		handle := uint64(s.mem.Args[2]) | uint64(s.mem.Args[3])<<32
 		if id < len(s.Titles) {
@@ -713,7 +713,7 @@ func (s *MKVServer) handleCallback(cmd uint32) (uint32, uint32) {
 		return 0, 0
 
 	default:
-		log.DebugLog("MKV unknown callback cmd=0x%x", cmd)
+		log.Log(7, "MKV unknown callback cmd=0x%x", cmd)
 		s.mem.Args[0] = 0
 		return 1, 0
 	}
@@ -734,7 +734,7 @@ func (s *MKVServer) SetSingleDrive(device string) error {
 	b := append([]byte(device), 0)
 	copy(s.mem.StrBuf[:], b)
 	s.mem.Args[0] = apset_io_SingleDrive
-	log.DebugLog("SetSingleDrive: sending command apCallSetSettingString with setting ID %d and value %q", apset_io_SingleDrive, device)
+	log.Log(7, "SetSingleDrive: sending command apCallSetSettingString with setting ID %d and value %q", apset_io_SingleDrive, device)
 	return s.execCmd(apCallSetSettingString, 1, uint32(len(b)))
 }
 
@@ -765,7 +765,7 @@ func (s *MKVServer) SetMinTitleLength(seconds int) error {
 func (s *MKVServer) ScanDrives() error {
 	s.mem = APShmem{}
 	s.mem.Args[0] = 0 // full scan - only call this once when disc detected
-	log.DebugLog("ScanDrives: sending command apCallUpdateAvailableDrives with Args[0]=%d", s.mem.Args[0])
+	log.Log(7, "ScanDrives: sending command apCallUpdateAvailableDrives with Args[0]=%d", s.mem.Args[0])
 	return s.execCmd(apCallUpdateAvailableDrives, 1, 0)
 }
 
@@ -780,7 +780,7 @@ func (s *MKVServer) UpdateDrives() error {
 // ScanConfiguredDrives probes hardware respecting current settings (like apset_io_SingleDrive).
 func (s *MKVServer) ScanConfiguredDrives() error {
 	s.mem = APShmem{}
-	log.DebugLog("ScanConfiguredDrives: sending command apCallUpdateAvailableDrives with 0 arguments")
+	log.Log(7, "ScanConfiguredDrives: sending command apCallUpdateAvailableDrives with 0 arguments")
 	return s.execCmd(apCallUpdateAvailableDrives, 0, 0)
 }
 
@@ -935,12 +935,12 @@ func (s *MKVServer) GetUiItemInfo(handle uint64, attrID uint32) (string, error) 
 	if err := s.execCmd(apCallGetUiItemInfo, 3, 0); err != nil {
 		return "", err
 	}
-	//log.DebugLog("GetUiItemInfo handle=%d attr=%d args[0]=%d args[1]=%d args[2]=%d", handle, attrID, s.mem.Args[0], s.mem.Args[1], s.mem.Args[2])
+	log.Log(7, "GetUiItemInfo handle=%d attr=%d args[0]=%d args[1]=%d args[2]=%d", handle, attrID, s.mem.Args[0], s.mem.Args[1], s.mem.Args[2])
 	if s.mem.Args[1] == 0 {
 		return "", nil
 	}
 	// UTF-8 string in strbuf
-	//log.DebugLog("GetUiItemInfo attr=%d raw strbuf: % x", attrID, s.mem.StrBuf[:32])
+	log.Log(7, "GetUiItemInfo attr=%d raw strbuf: % x", attrID, s.mem.StrBuf[:32])
 	return nullTermString(s.mem.StrBuf[:]), nil
 }
 
