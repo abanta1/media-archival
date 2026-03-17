@@ -122,12 +122,12 @@ func main() {
 		// Load config based on flag
 		if _, err := os.Stat(*configPath); err == nil {
 
-			log.Log(-1, "Loading config from %s...\n", *configPath)
+			log.Log(-1, "Loading config from %s...", *configPath)
 			cfg, _ = config.LoadConfig(*configPath)
 			configFound = true
 		} else {
 
-			log.Log(-1, "Config file not found\n")
+			log.Log(-1, "Config file not found")
 			configFound = false
 		}
 	}
@@ -135,7 +135,7 @@ func main() {
 	for _, p := range defaultMKVPaths {
 		if _, err := os.Stat(p); err == nil {
 			cfg.MakeMKVPath = p
-			log.Log(-1, "MakeMKV found at: %s\n", p)
+			log.Log(-1, "MakeMKV found at: %s", p)
 			break
 		}
 	}
@@ -233,7 +233,7 @@ func main() {
 		for _, p := range defaultMKVPaths {
 			if _, err := os.Stat(p); err == nil {
 				cfg.MakeMKVPath = p
-				log.Log(-1, "MakeMKV found at: %s\n", p)
+				log.Log(-1, "MakeMKV found at: %s", p)
 				break
 			}
 		}
@@ -274,20 +274,25 @@ func main() {
 
 	server, err := mkv.NewMKVServer(cfg.MakeMKVPath)
 	if err != nil {
-		log.Log(0, "Failed to start MKV server: %v\n", err)
+		log.Log(0, "Failed to start MKV server: %v", err)
 		os.Exit(1)
 	}
 	server.TargetDrive = cfg.DriveLetter
 	defer server.Close()
 
+	server.CurrentStage = "Starting MakeMKV"
+	server.DrawStatusLines()
+
 	if cfg.MinSeconds > 0 {
 		if err := server.SetMinTitleLength(cfg.MinSeconds); err != nil {
-			log.Log(4, "Failed to set minimum title length: %v\n", err)
+			log.Log(4, "Failed to set minimum title length: %v", err)
 		} else {
-			log.Log(6, "Minimum title length: %ds (%dm)\n", cfg.MinSeconds, cfg.MinSeconds/60)
+			log.Log(6, "Minimum title length: %ds (%dm)", cfg.MinSeconds, cfg.MinSeconds/60)
 		}
 	}
-	log.Log(-1, "MakeMKV Go-Auto is Running\n")
+
+	server.CurrentStage = "MakeMKV Go-Auto is Running"
+	server.DrawStatusLines()
 
 	if globals.LogLevel < 0 {
 		stopResize := make(chan struct{})
@@ -418,7 +423,8 @@ func main() {
 
 		log.Log(6, "Drive Index: %d\n", driveIndex)
 		log.Log(6, "Opening disc: driveIndex=%d, drive device=%q label=%q state=%d", driveIndex, server.Drives[driveIndex].Device, server.Drives[driveIndex].Label, server.Drives[driveIndex].State)
-		log.Log(-1, "Waiting for disc scan...")
+		//log.Log(-1, "Waiting for disc scan...")
+		server.CurrentStage = "Waiting for disc scan"
 
 		deadline := time.Now().Add(240 * time.Second)
 		for !server.DiscReady && time.Now().Before(deadline) {
