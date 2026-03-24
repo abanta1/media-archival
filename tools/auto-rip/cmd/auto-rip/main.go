@@ -2,9 +2,12 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	_ "embed"
 	"flag"
 	"fmt"
+	"image"
 	"math"
 	"media-archival/v7/internal/config"
 	"media-archival/v7/internal/globals"
@@ -25,9 +28,14 @@ import (
 	"unicode"
 	"unsafe"
 
+	"github.com/blacktop/go-termimg"
+
 	"golang.org/x/sys/windows"
 	"golang.org/x/term"
 )
+
+//go:embed makemkv.png
+var embeddedLogo []byte
 
 // Global Config (PS1 param block)
 var (
@@ -56,6 +64,7 @@ func setConsoleTitle(title string) {
 
 func main() {
 	enableANSI()
+
 	setConsoleTitle("MakeMKV Go-Auto")
 
 	configPath := flag.String("config", "", "")
@@ -115,6 +124,15 @@ func main() {
 		`C:\Program Files\MakeMKV\makemkvcon.exe`,
 	}
 	cfg.MakeMKVPath = ""
+
+	// Height=256, Width=256
+	img, _, _ := image.Decode(bytes.NewReader(embeddedLogo))
+	//dst := image.NewRGBA(image.Rect(0, 0, 128, 128))
+	//draw.ApproxBiLinear.Scale(dst, dst.Bounds(), img, img.Bounds(), draw.Over, nil)
+
+	termimg.Print(img)
+	fmt.Printf("\n")
+	fmt.Printf("\n")
 
 	var configFound bool
 
