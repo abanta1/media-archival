@@ -1,3 +1,4 @@
+﻿// Copyright (c) 2000-2026 Anthony Banta - MIT License
 package mkv
 
 import (
@@ -306,7 +307,7 @@ type MKVServer struct {
 	CurrentStage     string
 	TargetDrive      string
 
-	// Rip error tracking — reset by SaveAllTitles, populated by apBackReportUiMessage
+	// Rip error tracking â€” reset by SaveAllTitles, populated by apBackReportUiMessage
 	ripReadErrors int
 	ripMessages   []string
 }
@@ -350,7 +351,7 @@ func NewMKVServer(makemkvPath string) (*MKVServer, error) {
 	// Required init sequence before UpdateDrives will fire apBackUpdateDrive callbacks.
 	// Mirrors AppGetInterfaceLanguageData() in lstring.cpp called by main.cpp after Init().
 	//
-	// Step 1: apCallAppGetString(85) — Id=23 (AP_vastr_InterfaceLanguage), Index1=7000 (AP_APP_LOC_MAX), Index2=0
+	// Step 1: apCallAppGetString(85) â€” Id=23 (AP_vastr_InterfaceLanguage), Index1=7000 (AP_APP_LOC_MAX), Index2=0
 	s.mem = APShmem{}
 	s.mem.Args[0] = 23   // AP_vastr_InterfaceLanguage
 	s.mem.Args[1] = 7000 // AP_APP_LOC_MAX
@@ -360,7 +361,7 @@ func NewMKVServer(makemkvPath string) (*MKVServer, error) {
 		return nil, fmt.Errorf("AppGetString init: %w", err)
 	}
 
-	// Step 2: apCallGetInterfaceLanguageData(87) — arg[0]=7000 (AP_APP_LOC_MAX)
+	// Step 2: apCallGetInterfaceLanguageData(87) â€” arg[0]=7000 (AP_APP_LOC_MAX)
 	// Return value ignored (no language pack = fine, server still initializes drive state)
 	s.mem = APShmem{}
 	s.mem.Args[0] = 7000 // AP_APP_LOC_MAX
@@ -498,7 +499,7 @@ func (s *MKVServer) handleCallback(cmd uint32) (uint32, uint32) {
 		log.Log(7, "MKV msg: code=%d flags=0x%x msg=%q", code, flags, msg)
 
 		// AP_UIMSG_BOXERROR (516) is the flag combination the GUI renders as a
-		// Critical dialog — genuine blocking errors like read failures.
+		// Critical dialog â€” genuine blocking errors like read failures.
 		// Everything else (debug=32, hidden=64, info, skipped titles) is noise.
 		const (
 			apUimsgBoxMask  = 3854
@@ -527,7 +528,7 @@ func (s *MKVServer) handleCallback(cmd uint32) (uint32, uint32) {
 				lo := uint32(p[1])
 				p = p[2:]
 				if hi&0x80 != 0 {
-					// code entry — 2 more bytes, no string
+					// code entry â€” 2 more bytes, no string
 					p = p[2:]
 					continue
 				}
@@ -845,7 +846,7 @@ func (s *MKVServer) DrawStatusLines() {
 		if f > barLength {
 			f = barLength
 		}
-		return strings.Repeat("█", f) + strings.Repeat("░", barLength-f)
+		return strings.Repeat("â–ˆ", f) + strings.Repeat("â–‘", barLength-f)
 	}
 	var line0 string
 	var line1 string
@@ -1059,3 +1060,4 @@ func parseDurationToMinutes(duration string) int {
 	fmt.Sscanf(duration, "%d", &secs)
 	return secs / 60
 }
+
