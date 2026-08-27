@@ -1,3 +1,4 @@
+# Copyright (c) 2000-2026 Anthony Banta - MIT License
 $mkvs2 = Get-ChildItem -Recurse -Include VIDEO_TS
 foreach ($mkv2 in $mkvs2){
 $host.ui.RawUI.WindowTitle = "Encoding $($mkvs2.IndexOf($mkv2)+1)/$($mkvs2.Count) - $($mkv2.Parent.Name)"

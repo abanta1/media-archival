@@ -1,3 +1,4 @@
+# Copyright (c) 2000-2026 Anthony Banta - MIT License
 # Define quality weights for scoring (Higher = Better)
 $FormatWeights = @{
     "truehd"       = 100

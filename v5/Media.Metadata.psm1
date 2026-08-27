@@ -1,3 +1,4 @@
+# Copyright (c) 2000-2026 Anthony Banta - MIT License
 function Get-Metadata {
     param(
         [string]$VideoPath,

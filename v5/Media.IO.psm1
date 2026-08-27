@@ -1,3 +1,4 @@
+# Copyright (c) 2000-2026 Anthony Banta - MIT License
 
 $script:SessionLog = ".\unified_log_$(Get-Date -Format 'yyyyMMdd_HHmmss').txt"
 Set-Content -Path $script:SessionLog -Value "" -Encoding UTF8
