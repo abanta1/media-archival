@@ -1,3 +1,4 @@
+﻿# Copyright (c) 2000-2026 Anthony Banta - MIT License
 param(
     [switch]$Encode,
 	[switch]$AnalyzeOnly,

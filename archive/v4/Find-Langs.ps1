@@ -1,3 +1,4 @@
+﻿# Copyright (c) 2000-2026 Anthony Banta - MIT License
 # Path to your ffprobe tool
 $FFprobePath = "G:\ffprobe.exe"
 
@@ -43,3 +44,4 @@ foreach ($file in $files) {
 
 # 3. Output the Final Table
 $report | Format-Table -AutoSize
+
