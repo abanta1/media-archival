@@ -1,3 +1,4 @@
+﻿// Copyright (c) 2000-2026 Anthony Banta - MIT License
 package log
 
 import (
@@ -32,3 +33,4 @@ func Log(level int, format string, args ...interface{}) {
 		fmt.Printf(format+"\n", args...)
 	}
 }
+

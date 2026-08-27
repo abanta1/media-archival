@@ -1,3 +1,4 @@
+﻿// Copyright (c) 2000-2026 Anthony Banta - MIT License
 package processor
 
 import (
@@ -74,3 +75,4 @@ func ProcessCuts(info *models.DiscInfo, minSeconds int) {
 	info.Extras = extras
 	info.DistinctCuts = distinct
 }
+

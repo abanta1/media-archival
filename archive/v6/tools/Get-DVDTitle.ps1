@@ -1,3 +1,4 @@
+﻿# Copyright (c) 2000-2026 Anthony Banta - MIT License
 # ================================
 # DVD Fingerprint + TMDB Lookup
 # ================================
@@ -700,3 +701,4 @@ video                 : False
 vote_average          : 3.891
 vote_count            : 46 
 #>
+

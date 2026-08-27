@@ -1,3 +1,4 @@
+﻿# Copyright (c) 2000-2026 Anthony Banta - MIT License
 param([string]$Target = 'c:\Users\abanta\Media-Archival\Claude-Unified.ps1')
 
 $errors = $null
@@ -31,3 +32,4 @@ if (Get-Module -ListAvailable -Name PSScriptAnalyzer) {
 } else {
     Write-Output 'PSScriptAnalyzer not installed'
 }
+

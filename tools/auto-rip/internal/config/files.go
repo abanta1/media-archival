@@ -1,3 +1,4 @@
+﻿// Copyright (c) 2000-2026 Anthony Banta - MIT License
 package config
 
 import (
@@ -15,3 +16,4 @@ func ValidatePaths(cfg Config) bool {
 	}
 	return true
 }
+

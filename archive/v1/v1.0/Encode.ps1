@@ -1,6 +1,7 @@
+﻿# Copyright (c) 2000-2026 Anthony Banta - MIT License
 $mkvs = Get-ChildItem -Recurse -Include *.mkv
 foreach ($mkv in $mkvs){
-$host.ui.RawUI.WindowTitle = “Encoding $($mkvs.IndexOf($mkv))/$($mkvs.Count) - $($mkv.Directory.Name)/$($mkv.Name)”
+$host.ui.RawUI.WindowTitle = â€œEncoding $($mkvs.IndexOf($mkv))/$($mkvs.Count) - $($mkv.Directory.Name)/$($mkv.Name)â€
 If (-not (Test-Path "$($mkv.PSDrive.Root)\Encoded\$($mkv.Directory.Name)")){
 Write-Host "-------------------------------------------------------------------------------Creating Encoded directory $($mkv.psdrive.root)\Encoded\$($mkv.directory.name)"
 New-Item "$($mkv.psdrive.root)\Encoded\$($mkv.directory.name)" -ItemType Directory

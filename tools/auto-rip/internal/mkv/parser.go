@@ -1,3 +1,4 @@
+﻿// Copyright (c) 2000-2026 Anthony Banta - MIT License
 package mkv
 
 import (
@@ -63,3 +64,4 @@ func ParseMakeMKVOutput(scanner *bufio.Scanner) models.DiscInfo {
 	}
 	return info
 }
+

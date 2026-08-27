@@ -1,3 +1,4 @@
+﻿# Copyright (c) 2000-2026 Anthony Banta - MIT License
 param([string]$Target = 'c:\Users\abanta\Media-Archival\Claude-Unified.ps1')
 $errors = $null
 try {
@@ -22,3 +23,4 @@ if ($errors -and $errors.Count -gt 0) {
         Write-Output "----"
     }
 } else { Write-Output 'No syntax errors' }
+

@@ -1,3 +1,4 @@
+﻿# Copyright (c) 2000-2026 Anthony Banta - MIT License
 # ============================================
 # Metadata Review & Batch Remux Script
 # ============================================
@@ -64,10 +65,10 @@ foreach ($file in $files) {
 			#Write-Host "    [DEBUG-HEX] FirstWord Bytes: $([System.Text.Encoding]::UTF8.GetBytes($firstWord) -join ' ')" -ForegroundColor Red
 			$proposedName = switch -Regex ($firstWord) {
 				"English" { "English" }
-				"Fran(c|ais|ch|\xe7ais)" { "Fran$([char]0xe7)ais" } # \xe7 matches ç
-				"Span(ish|ish|ol)|Espa(ñ|.*|Ã±|\xf1)ol" { "Espa$([char]0xf1)ol" }
+				"Fran(c|ais|ch|\xe7ais)" { "Fran$([char]0xe7)ais" } # \xe7 matches Ã§
+				"Span(ish|ish|ol)|Espa(Ã±|.*|ÃƒÂ±|\xf1)ol" { "Espa$([char]0xf1)ol" }
 				"Italian|Italiano" { "Italiano" }
-				"Russian|Русский|\x0420\x0443\x0441\x0441\x043a\x0438\x0439" { -join [char[]](0x0420, 0x0443, 0x0441, 0x0441, 0x043a, 0x0438, 0x0439) }
+				"Russian|Ð ÑƒÑÑÐºÐ¸Ð¹|\x0420\x0443\x0441\x0441\x043a\x0438\x0439" { -join [char[]](0x0420, 0x0443, 0x0441, 0x0441, 0x043a, 0x0438, 0x0439) }
 				"German|Deutsch" { "Deutsch" }
 				default { $firstWord } # CHANGED: returning $firstWord prevents the double-up
 			}
@@ -87,10 +88,10 @@ foreach ($file in $files) {
 			#Write-Host "    [DEBUG-HEX] FirstWord Bytes: $([System.Text.Encoding]::UTF8.GetBytes($firstWord) -join ' ')" -ForegroundColor Red
 			$proposedName = switch -Regex ($firstWord) {
 				"English" { "English" }
-				"Fran(c|ais|ch|\xe7ais)" { "Fran$([char]0xe7)ais" } # \xe7 matches ç
-				"Span(ish|ish|ol)|Espa(ñ|.*|Ã±|\xf1)ol" { "Espa$([char]0xf1)ol" }
+				"Fran(c|ais|ch|\xe7ais)" { "Fran$([char]0xe7)ais" } # \xe7 matches Ã§
+				"Span(ish|ish|ol)|Espa(Ã±|.*|ÃƒÂ±|\xf1)ol" { "Espa$([char]0xf1)ol" }
 				"Italian|Italiano" { "Italiano" }
-				"Russian|Русский|\x0420\x0443\x0441\x0441\x043a\x0438\x0439" { -join [char[]](0x0420, 0x0443, 0x0441, 0x0441, 0x043a, 0x0438, 0x0439) }
+				"Russian|Ð ÑƒÑÑÐºÐ¸Ð¹|\x0420\x0443\x0441\x0441\x043a\x0438\x0439" { -join [char[]](0x0420, 0x0443, 0x0441, 0x0441, 0x043a, 0x0438, 0x0439) }
 				"German|Deutsch" { "Deutsch" }
 				default { $firstWord } # CHANGED: returning $firstWord prevents the double-up
 			}

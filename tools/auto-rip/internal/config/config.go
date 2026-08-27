@@ -1,3 +1,4 @@
+﻿// Copyright (c) 2000-2026 Anthony Banta - MIT License
 package config
 
 import (
@@ -34,3 +35,4 @@ func SaveConfig(cfgPath string, cfg Config) error {
 	enc.SetIndent("", "  ")
 	return enc.Encode(cfg)
 }
+
