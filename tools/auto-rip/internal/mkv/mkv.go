@@ -1,3 +1,4 @@
+﻿// Copyright (c) 2000-2026 Anthony Banta - MIT License
 package mkv
 
 import (
@@ -217,3 +218,4 @@ func GetDriveIndex(targetLetter string, exePath string) (string, error) {
 	}
 	return "", fmt.Errorf("drive %s not found", targetLetter)
 }
+

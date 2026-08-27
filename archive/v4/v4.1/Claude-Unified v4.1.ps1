@@ -1,3 +1,4 @@
+﻿# Copyright (c) 2000-2026 Anthony Banta - MIT License
 # ============================================
 # Encode / SubReview / MetadataRemux - Unified Script
 # ============================================
@@ -110,8 +111,8 @@ function Write-Log {
 }
 
 $langDisplayMap = @{
-    "eng" = "English"; "fra" = "Français"; "spa" = "Español"
-    "ita" = "Italiano"; "rus" = "Русский"; "deu" = "Deutsch"
+    "eng" = "English"; "fra" = "FranÃ§ais"; "spa" = "EspaÃ±ol"
+    "ita" = "Italiano"; "rus" = "Ð ÑƒÑÑÐºÐ¸Ð¹"; "deu" = "Deutsch"
 }
 
 function Convert-IsoCode ([string]$isoText) {

@@ -1,3 +1,4 @@
+﻿// Copyright (c) 2000-2026 Anthony Banta - MIT License
 package models
 
 import "math"
@@ -57,3 +58,4 @@ type TrackInfo struct {
 func IsDuplicate(m1, m2 int, threshold int) bool {
 	return math.Abs(float64(m1-m2)) <= float64(threshold)
 }
+

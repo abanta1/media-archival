@@ -1,3 +1,4 @@
+﻿// Copyright (c) 2000-2026 Anthony Banta - MIT License
 package ui
 
 import (
@@ -53,7 +54,7 @@ func DrawProgressBar(activity string, status string, pct int, line int) {
 	if filledLength > barLength {
 		filledLength = barLength
 	}
-	bar := strings.Repeat("█", filledLength) + strings.Repeat("░", barLength-filledLength)
+	bar := strings.Repeat("â–ˆ", filledLength) + strings.Repeat("â–‘", barLength-filledLength)
 
 	_, height, err := term.GetSize(int(os.Stdout.Fd()))
 	if err != nil {
@@ -66,3 +67,4 @@ func DrawProgressBar(activity string, status string, pct int, line int) {
 
 	fmt.Printf("\033[s\033[%d;0H\033[K%s: [%s] %3d%% | %s\033[u", targetLine, activity, bar, pct, status)
 }
+

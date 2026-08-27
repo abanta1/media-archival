@@ -1,3 +1,4 @@
+﻿// Copyright (c) 2000-2026 Anthony Banta - MIT License
 package tmdb
 
 import (
@@ -94,3 +95,4 @@ func mathAbs(n int) int {
 	}
 	return n
 }
+

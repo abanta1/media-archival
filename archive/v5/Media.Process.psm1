@@ -1,3 +1,4 @@
+﻿# Copyright (c) 2000-2026 Anthony Banta - MIT License
 function Invoke-EncodeMode {
     param(
         [string]$SrcDir,

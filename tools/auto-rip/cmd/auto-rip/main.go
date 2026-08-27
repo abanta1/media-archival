@@ -1,3 +1,4 @@
+﻿// Copyright (c) 2000-2026 Anthony Banta - MIT License
 package main
 
 import (
@@ -680,7 +681,7 @@ func main() {
 				server.DiscReady = false
 				ripErr := server.SaveAllTitles()
 
-				// SaveAllTitles is async — poll OnIdle until LeaveJobMode sets DiscReady
+				// SaveAllTitles is async â€” poll OnIdle until LeaveJobMode sets DiscReady
 				for !server.DiscReady {
 					time.Sleep(500 * time.Millisecond)
 					server.OnIdle()
@@ -695,17 +696,17 @@ func main() {
 					ripFailed = true
 				}
 
-				// 2. AP_UIMSG_BOXERROR messages received during the rip — genuine errors
+				// 2. AP_UIMSG_BOXERROR messages received during the rip â€” genuine errors
 				//    the GUI would have shown as a Critical dialog (read failures, etc.).
 				//    Warning only: makemkvcon often recovers, so the size check is the gate.
 				if hadErr, msgs := server.RipHadErrors(); hadErr {
 					log.Log(4, "WARNING: Rip reported %d error(s) for title %d (validating output size):\n", len(msgs), cut.Index)
 					for _, m := range msgs {
-						fmt.Fprintf(os.Stderr, "  • %s\n", m)
+						fmt.Fprintf(os.Stderr, "  â€¢ %s\n", m)
 					}
 				}
 
-				// 3. Filesystem sanity check — stat the filename makemkvcon actually
+				// 3. Filesystem sanity check â€” stat the filename makemkvcon actually
 				//    wrote (re-read from the server post-rip) rather than our predicted
 				//    name, so we never accidentally stat a stale leftover file.
 				if !ripFailed {
@@ -723,7 +724,7 @@ func main() {
 							hi := int64(float64(expected) * 1.15)
 							if actual < lo || actual > hi {
 								log.Log(3,
-									"Rip output size out of range for title %d: got %d bytes, expected %d ±15%% (%d–%d)\n",
+									"Rip output size out of range for title %d: got %d bytes, expected %d Â±15%% (%dâ€“%d)\n",
 									cut.Index, actual, expected, lo, hi)
 								ripFailed = true
 							}
@@ -737,7 +738,7 @@ func main() {
 				}
 
 				if ripFailed {
-					log.Log(3, "Rip FAILED for title %d: %s — skipping move\n", cut.Index, encodingTrackName)
+					log.Log(3, "Rip FAILED for title %d: %s â€” skipping move\n", cut.Index, encodingTrackName)
 					continue
 				}
 
@@ -879,3 +880,4 @@ func RunParallelLookups(info *models.DiscInfo, apiKey string, userTitle string) 
 	}
 	wg.Wait()
 }
+

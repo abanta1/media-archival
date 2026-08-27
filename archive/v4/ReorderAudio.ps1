@@ -1,3 +1,4 @@
+﻿# Copyright (c) 2000-2026 Anthony Banta - MIT License
 # Define quality weights for scoring (Higher = Better)
 $FormatWeights = @{
     "truehd"       = 100
@@ -136,3 +137,4 @@ foreach ($file in $files) {
     $ffmpegArgs += @("-c:v", "copy", "-map", "0:s?", "-c:s", "copy", "$outputName", "-y", "-stats")
     & $FFmpegPath $ffmpegArgs
 }
+
